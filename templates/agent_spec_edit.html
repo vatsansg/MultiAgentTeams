@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ spec.display_name }} - Agent Console{% endblock %}
+{% block content %}
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">{{ spec.role_title }}{% if spec.is_coordinator %} &middot; Coordinator{% endif %}</p>
+      <h2>Edit {{ spec.display_name }}</h2>
+      <p class="muted">Role and coordinator status aren't editable here - only the text/JSON fields below.</p>
+    </div>
+  </div>
+
+  <form method="post" class="new-project-form" style="max-width: 720px;">
+    <label>Display name
+      <input type="text" name="display_name" required maxlength="80" value="{{ form.display_name }}">
+    </label>
+    <label>Role title
+      <input type="text" name="role_title" required maxlength="80" value="{{ form.role_title }}">
+    </label>
+    <label>Description
+      <textarea name="description" rows="2" required>{{ form.description }}</textarea>
+    </label>
+    <label>Skills (JSON list)
+      <input type="text" name="skills" value="{{ form.skills }}" placeholder='["Node.js", "React"]'>
+    </label>
+    <label>Tools label
+      <input type="text" name="tools_label" required maxlength="120" value="{{ form.tools_label }}">
+    </label>
+    {% if not spec.is_coordinator %}
+    <label>Handoff instructions
+      <textarea name="handoff_instructions" rows="4">{{ form.handoff_instructions }}</textarea>
+    </label>
+    {% endif %}
+    <label>System prompt
+      <textarea name="system_prompt" rows="18" class="brief-editor-textarea" required>{{ form.system_prompt }}</textarea>
+    </label>
+
+    <div class="new-project-actions">
+      <a class="btn" href="{{ url_for('dashboard.agent_specs') }}">Cancel</a>
+      <button type="submit" name="action" value="validate" class="btn">Validate</button>
+      <button type="submit" name="action" value="save" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

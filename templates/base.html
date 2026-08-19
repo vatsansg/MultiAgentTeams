@@ -37,6 +37,37 @@
     </div>
   </header>
 
+  {% if session.get('logged_in') %}
+  <div class="app-shell">
+    <aside class="sidebar">
+      <nav class="sidebar-nav">
+        <a class="sidebar-link {{ 'active' if request.endpoint == 'dashboard.index' }}" href="{{ url_for('dashboard.index') }}">
+          <span class="sidebar-link-icon" aria-hidden="true">&#9635;</span> Dashboard
+        </a>
+        <a class="sidebar-link {{ 'active' if request.endpoint == 'dashboard.agents' }}" href="{{ url_for('dashboard.agents') }}">
+          <span class="sidebar-link-icon" aria-hidden="true">&#9679;</span> Agents
+        </a>
+        <a class="sidebar-link {{ 'active' if request.endpoint in ('dashboard.teams', 'dashboard.new_team', 'dashboard.edit_team') }}" href="{{ url_for('dashboard.teams') }}">
+          <span class="sidebar-link-icon" aria-hidden="true">&#9670;</span> Teams
+        </a>
+        <a class="sidebar-link {{ 'active' if request.endpoint in ('dashboard.agent_specs', 'dashboard.edit_agent_spec') }}" href="{{ url_for('dashboard.agent_specs') }}">
+          <span class="sidebar-link-icon" aria-hidden="true">&#9998;</span> Agent Specs
+        </a>
+      </nav>
+    </aside>
+
+    <main class="container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}" role="status">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% else %}
   <main class="container">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -45,8 +76,9 @@
         {% endfor %}
       {% endif %}
     {% endwith %}
-    {% block content %}{% endblock %}
+    {{ self.content() }}
   </main>
+  {% endif %}
 
   <script>
     // Global submit-loading state: any form that actually submits (i.e. wasn't

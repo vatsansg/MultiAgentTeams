@@ -201,6 +201,47 @@ a:hover { color: var(--primary-600); }
 .topbar nav a.logout-link:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
 
 /* ==========================================================================
+   App shell / sidebar
+   ========================================================================== */
+
+.app-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: calc(100vh - 61px);
+}
+.sidebar {
+  flex: 0 0 220px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: var(--sp-6) var(--sp-4);
+}
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: calc(61px + var(--sp-6));
+}
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  color: var(--ink-700);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sidebar-link-icon { color: var(--text-faint); font-size: 0.8rem; flex-shrink: 0; }
+.sidebar-link:hover { background: var(--surface-sunken); color: var(--ink-900); }
+.sidebar-link.active { background: var(--primary-tint); color: var(--primary-700); }
+.sidebar-link.active .sidebar-link-icon { color: var(--primary); }
+
+.app-shell .container { flex: 1 1 auto; min-width: 0; }
+
+/* ==========================================================================
    Layout
    ========================================================================== */
 
@@ -625,7 +666,7 @@ details[open] > summary::before { content: "▾ "; }
 .field-error { font-size: 0.8rem; color: var(--danger); font-weight: 600; }
 
 .new-project-actions { display: flex; gap: var(--sp-3); margin-top: 2px; }
-input, textarea {
+input, textarea, select {
   padding: 9px 11px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -635,13 +676,42 @@ input, textarea {
   color: var(--text);
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
-input:hover, textarea:hover { border-color: var(--ink-300); }
-input:focus, textarea:focus {
+input:hover, textarea:hover, select:hover { border-color: var(--ink-300); }
+input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-tint);
 }
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
+select { cursor: pointer; }
+
+.skill-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: var(--primary-tint);
+  color: var(--primary-700);
+}
+
+.schedule-picker { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
+.schedule-picker-row { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: end; }
+.schedule-picker-row label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-700);
+  gap: 5px;
+}
+.schedule-summary {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
 
 .new-project { margin-top: var(--sp-5); }
 .new-project > summary {
@@ -806,6 +876,23 @@ input::placeholder, textarea::placeholder { color: var(--text-faint); }
   .login-shell { grid-template-columns: 1fr; }
   .login-brand-panel { padding: var(--sp-10) var(--sp-6); }
   .login-brand-list { display: none; }
+}
+
+@media (max-width: 860px) {
+  .app-shell { flex-direction: column; min-height: 0; }
+  .sidebar {
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: var(--sp-2) var(--sp-4);
+    overflow-x: auto;
+  }
+  .sidebar-nav {
+    position: static;
+    flex-direction: row;
+    gap: var(--sp-2);
+  }
+  .sidebar-link { white-space: nowrap; }
 }
 
 @media (max-width: 720px) {

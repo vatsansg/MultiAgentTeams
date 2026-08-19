@@ -254,12 +254,28 @@ the app and, per Step 11, pauses scheduled runs.
 Open `http://localhost:5000` in a browser. Enter the `CONSOLE_USERNAME` /
 `CONSOLE_PASSWORD` from your `.env`.
 
-**Outcome:** you land on the dashboard and see an org chart with Delivery
-Lead (coordinator) on top and Roger and Michael as specialists on the level
-below, an empty Projects table, and an empty Run history table. Each agent
-card shows "not created yet" - that's expected until Step 9's first real
-run. See README.md's "Customizing the agent roster" section if you want to
-add a third specialist (e.g. a Developer or Tester) later.
+**Outcome:** you land on the dashboard. On first startup the app seeds a
+default agent catalog (Delivery Lead, Roger the Business Analyst, Michael
+the Solution Architect, Smith the Developer) - but there are no teams yet,
+so you'll see a prompt to create one before an org chart or project can
+exist. See Step 7b below, and README.md's "Teams and the agent catalog"
+section for the full model.
+
+---
+
+## Step 7b - Create your first team
+
+Sidebar → **Teams** → **+ Create team**. Give it a name (e.g. `Website
+Delivery Team`) and an optional description, then **Create team**. This
+snapshots the current agent catalog (Delivery Lead, Roger, Michael, Smith)
+into the new team - there's no picking a subset in this pass, every team
+gets the full catalog.
+
+**Outcome:** back on the dashboard, the new team appears in the Team
+selector at the top and its org chart renders below - Delivery Lead
+(coordinator) on top, Roger/Michael/Smith as specialists on the level
+below. Each agent card shows "not created yet" - that's expected until
+Step 9's first real run.
 
 ---
 
@@ -267,15 +283,17 @@ add a third specialist (e.g. a Developer or Tester) later.
 
 On the dashboard, open **"+ New project"**:
 
-1. **Project name** - short and specific, e.g. `Boutique Coffee Roastery Website`.
-2. **Project brief** - as complete as you can make it. Cover, if you can:
+1. **Team** - defaults to whichever team is currently selected above; pick
+   a different one if you have more than one.
+2. **Project name** - short and specific, e.g. `Boutique Coffee Roastery Website`.
+3. **Project brief** - as complete as you can make it. Cover, if you can:
    purpose, target audience, key pages/features, must-have integrations,
    branding constraints, success criteria. This pipeline runs unattended -
    nobody will ask you a follow-up question, so gaps become labeled
    assumptions instead.
-3. Leave the schedule fields blank for now - you'll add a schedule in
-   Step 11.
-4. Click **Create project**.
+4. Leave the schedule picker on "Manual only" for now - you'll add a
+   schedule in Step 11.
+5. Click **Create project**.
 
 **Outcome:** the project appears in the Projects table with a "manual
 only" schedule pill.
@@ -286,11 +304,14 @@ only" schedule pill.
 
 Click **Run now** on your new project's row.
 
-**What happens:** `run_manager.start_run` creates a `runs` row and starts
-`pipeline.run_delivery_pipeline` in a background thread. The first run for
-a fresh install also creates the three agents and the `org-standards`
-memory store (cached to `data/agent_cache.json` so later runs reuse them
-instead of recreating them).
+**What happens:** `run_manager.start_run` loads the project's team,
+creates a `runs` row, and starts `pipeline.run_delivery_pipeline` in a
+background thread. The first run for a fresh team also creates that
+team's agents and the shared `org-standards` memory store (cached to
+`data/agent_cache.json`, keyed per team, so later runs reuse them instead
+of recreating them). If the team includes Smith (Developer), this first
+run also broadens the shared sandbox environment's network access in
+place (package manager registries + GitHub) - a one-time, automatic step.
 
 **Outcome:** the Run history table's new row shows `running`, then
 updates automatically (polled every 4 seconds) to `success` or `failed`.
@@ -307,14 +328,17 @@ If it fails, see Step 12.
 Once a run shows `success`:
 
 1. **Local files** - check `outputs/<project-slug>/BRD.md` and
-   `outputs/<project-slug>/Technical_Design_Document.md`.
-2. **Google Docs** - a "Delivery" folder should contain two new documents
-   titled after your project.
+   `outputs/<project-slug>/Technical_Design_Document.md` (if the team
+   includes Roger/Michael), and `outputs/<project-slug>/site.zip` (if the
+   team includes Smith - the run history row's Files column also gets a
+   "Site (.zip)" link).
+2. **Google Docs** - a "Delivery" folder should contain new documents
+   titled after your project, for whichever of the BRD/TDD were produced.
 3. **Slack** - your configured channel should have one or two short
    updates from the agent.
 4. **Dashboard** - the agent cards now show real agent ids instead of
-   "not created yet"; the run history row shows the estimated cost and
-   whether the outcome rubric reported `satisfied`.
+   "not created yet"; the run history row shows the estimated cost, which
+   team ran it, and whether the outcome rubric reported `satisfied`.
 
 **Outcome:** confirmation the whole chain - Claude, both memory stores,
 the outcome rubric, and both MCP integrations - is working end to end
@@ -324,12 +348,16 @@ against your real accounts.
 
 ## Step 11 - Set up a schedule, and keep the app running unattended
 
-On the project's row, open **Schedule** and set either:
+On the project's row, open **Schedule** and pick a frequency:
 
-- a **cron expression**, e.g. `0 6 * * 1` (every Monday at 06:00), or
-- an **interval**, e.g. `60` (every 60 minutes).
+- **Every day**, **Every week** (choose a weekday), or **Every month**
+  (choose a day 1-31), plus a time - 12-hour (AM/PM) or 24-hour clock,
+  hour/minute/second; or
+- **Every N minutes** (the old "interval" option, still available as the
+  simple advanced fallback), e.g. `60` for every 60 minutes.
 
-Click **Save schedule**.
+No cron syntax anywhere - `scheduler.parse_schedule_form()` turns these
+fields into the real APScheduler trigger. Click **Save schedule**.
 
 **Outcome:** the Projects table shows the new schedule pill, and
 `scheduler.add_or_update_job` registers a real APScheduler job -
@@ -382,7 +410,7 @@ source code.
 
 ---
 
-## Step 13 - Customize org standards, the rubric, or the model
+## Step 13 - Customize org standards, an agent spec, or the model
 
 - **Change your organization's default tech stack or tone:** edit
   `ORG_STANDARDS_STYLE` / `ORG_STANDARDS_TECH_DEFAULTS` in
@@ -390,16 +418,28 @@ source code.
   memory stores - an already-created one (check
   `data/agent_cache.json`) needs its memory files updated directly, or
   delete `data/agent_cache.json` to force recreation on the next run
-  (this also recreates the agents).
-- **Change what counts as "done":** edit `DELIVERY_RUBRIC` in the same
-  file.
+  (this also recreates every team's agents).
+- **Change a role's system prompt, description, skills, or tools label:**
+  sidebar → **Agent Specs** → edit the role → **Save** (use **Validate**
+  first for a quick sanity check). This is per-team-snapshot, not global:
+  it only affects **teams created after the change**. A team created
+  before the edit keeps using its already-provisioned agent's original
+  prompt until you delete that team and recreate it (or clear the
+  matching `cache_key` from `data/agent_cache.json` to force that one
+  agent to be recreated on the next run).
+- **Change what counts as "done":** the rubric is now assembled per-team
+  from `RUBRIC_BRD_SECTION` / `RUBRIC_TDD_SECTION` / `RUBRIC_SITE_SECTION`
+  in `../labs/shared/prompts.py` (`pipeline._build_rubric`), included only
+  for the roles actually on the team. Edit those constants for org-wide
+  rubric changes.
 - **Use a cheaper/faster model:** set `MODEL=claude-haiku-4-5-20251001` in
   `.env` and restart the app. This only affects agents created *after*
-  the change - delete `data/agent_cache.json` to force the existing
-  agents to be recreated with the new model.
+  the change - delete `data/agent_cache.json` to force existing agents to
+  be recreated with the new model.
 
-**Outcome:** changes take effect on the next run (or the next run after
-clearing the agent cache, for agent-level changes).
+**Outcome:** changes take effect on the next team created (agent-spec
+edits) or the next run (org-standards/rubric/model changes, or after
+clearing the agent cache for agent-level changes).
 
 ---
 

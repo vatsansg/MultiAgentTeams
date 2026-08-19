@@ -55,7 +55,21 @@ def start_run(project_id: int, trigger_type: str) -> int:
     if project is None:
         raise ValueError(f"No project with id {project_id}")
 
-    run_id = db.create_run(project_id, trigger_type)
+    team = db.get_team_with_members(project["team_id"]) if project["team_id"] else None
+    run_id = db.create_run(project_id, trigger_type, team_name=(team["name"] if team else None))
+
+    if team is None:
+        # No team assigned (a legacy project from before teams existed, or
+        # one whose team was deleted out from under it). Still create the
+        # run row - a visible history entry - and fail it immediately with
+        # a readable error, same as any other configuration problem this
+        # app surfaces, rather than raising before any row exists.
+        db.finish_run(
+            run_id, status="failed",
+            error="This project has no team assigned. Assign a team, then run it again.",
+        )
+        return run_id
+
     cancel_event = threading.Event()
     with _LOCK:
         _CANCEL_EVENTS[run_id] = cancel_event
@@ -72,7 +86,7 @@ def start_run(project_id: int, trigger_type: str) -> int:
 
         try:
             result = _PIPELINE_FN(
-                project["name"], project["brief"],
+                project["name"], project["brief"], team,
                 on_event=on_event, should_stop=cancel_event.is_set,
             )
             db.finish_run(
@@ -82,6 +96,7 @@ def start_run(project_id: int, trigger_type: str) -> int:
                 session_id=result.session_id,
                 brd_path=result.brd_path,
                 tdd_path=result.tdd_path,
+                site_path=result.site_path,
                 cost_usd=result.cost_usd,
             )
         except pipeline.PipelineStopped as exc:

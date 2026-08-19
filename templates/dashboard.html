@@ -1,21 +1,122 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - Agent Console{% endblock %}
+
+{% macro schedule_picker(project) %}
+{% set freq = project['schedule_frequency'] if project and project['schedule_frequency'] else '' %}
+{% set hour = project['schedule_hour'] if project and project['schedule_hour'] is not none else 0 %}
+{% set minute = project['schedule_minute'] if project and project['schedule_minute'] is not none else 0 %}
+{% set second = project['schedule_second'] if project and project['schedule_second'] is not none else 0 %}
+{% set weekday = project['schedule_weekday'] if project and project['schedule_weekday'] is not none else 0 %}
+{% set month_day = project['schedule_month_day'] if project and project['schedule_month_day'] is not none else 1 %}
+{% set interval_minutes = project['interval_minutes'] if project and project['interval_minutes'] else '' %}
+<div class="schedule-picker">
+  <div class="schedule-picker-row">
+    <label>Frequency
+      <select name="schedule_frequency" class="sp-frequency">
+        <option value="" {{ 'selected' if not freq }}>Manual only</option>
+        <option value="daily" {{ 'selected' if freq == 'daily' }}>Every day</option>
+        <option value="weekly" {{ 'selected' if freq == 'weekly' }}>Every week</option>
+        <option value="monthly" {{ 'selected' if freq == 'monthly' }}>Every month</option>
+        <option value="interval" {{ 'selected' if freq == 'interval' }}>Every N minutes</option>
+      </select>
+    </label>
+    <label class="sp-field sp-field-interval">Every N minutes
+      <input type="number" name="interval_minutes" min="5" placeholder="60" value="{{ interval_minutes }}">
+    </label>
+    <label class="sp-field sp-field-weekday">Day of week
+      <select name="schedule_weekday">
+        <option value="0" {{ 'selected' if weekday == 0 }}>Monday</option>
+        <option value="1" {{ 'selected' if weekday == 1 }}>Tuesday</option>
+        <option value="2" {{ 'selected' if weekday == 2 }}>Wednesday</option>
+        <option value="3" {{ 'selected' if weekday == 3 }}>Thursday</option>
+        <option value="4" {{ 'selected' if weekday == 4 }}>Friday</option>
+        <option value="5" {{ 'selected' if weekday == 5 }}>Saturday</option>
+        <option value="6" {{ 'selected' if weekday == 6 }}>Sunday</option>
+      </select>
+    </label>
+    <label class="sp-field sp-field-monthday">Day of month
+      <input type="number" name="schedule_month_day" min="1" max="31" value="{{ month_day }}">
+    </label>
+  </div>
+  <div class="schedule-picker-row sp-field sp-field-time">
+    <label>Clock
+      <select name="time_mode" class="sp-time-mode">
+        <option value="24h">24-hour</option>
+        <option value="12h">12-hour (AM/PM)</option>
+      </select>
+    </label>
+    <label class="sp-hour24">Hour (0-23)
+      <input type="number" name="schedule_hour" min="0" max="23" value="{{ hour }}">
+    </label>
+    <label class="sp-hour12">Hour (1-12)
+      <input type="number" name="schedule_hour_12" min="1" max="12" value="1">
+    </label>
+    <label class="sp-hour12">AM/PM
+      <select name="schedule_period">
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </label>
+    <label>Minute
+      <input type="number" name="schedule_minute" min="0" max="59" value="{{ minute }}">
+    </label>
+    <label>Second
+      <input type="number" name="schedule_second" min="0" max="59" value="{{ second }}">
+    </label>
+  </div>
+  {% if project and project['schedule_summary'] %}<span class="schedule-summary">Currently: {{ project['schedule_summary'] }}</span>{% endif %}
+</div>
+{% endmacro %}
+
 {% block content %}
 
 <section>
   <div class="section-head">
     <div class="section-head-text">
-      <p class="eyebrow">Delivery team</p>
-      <h2>Agent roster</h2>
-      <p class="muted">One coordinator, one level of specialists below it - the coordinator delegates to every specialist shown here on each run. Agent ids appear once a run has created them.</p>
+      <p class="eyebrow">Step 1</p>
+      <h2>Team</h2>
+      <p class="muted">Pick a team first - its members are what a project actually runs when you hit "Run now".</p>
+    </div>
+    <a class="btn" href="{{ url_for('dashboard.teams') }}">Manage teams</a>
+  </div>
+
+  {% if teams %}
+  <form method="get" action="{{ url_for('dashboard.index') }}" class="schedule-picker-row" style="align-items: end;">
+    <label>
+      <select name="team_id" onchange="this.form.submit()">
+        {% for t in teams %}
+        <option value="{{ t['id'] }}" {{ 'selected' if t['id'] == selected_team_id }}>{{ t['name'] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+  {% else %}
+  <div class="empty-state">
+    <strong>No teams yet</strong>
+    <span>Create a team to get a Delivery Lead, Business Analyst, Solution Architect, and Developer bundled together.</span>
+    <a class="btn btn-primary" style="margin-top: var(--sp-2);" href="{{ url_for('dashboard.new_team') }}">Create team</a>
+  </div>
+  {% endif %}
+</section>
+
+{% if selected_team %}
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">{{ selected_team.name }}</p>
+      <h2>Org chart</h2>
+      <p class="muted">{{ selected_team.description or 'One coordinator, one level of specialists below it - the coordinator delegates to every member shown here on each run.' }} Agent ids appear once a run has created them.</p>
     </div>
   </div>
+
+  {% set coordinator = (selected_team.members | selectattr('is_coordinator') | list)[0] %}
+  {% set specialists = selected_team.members | rejectattr('is_coordinator') | list %}
 
   <div class="org-chart">
     <div class="org-level org-level-coordinator">
       <div class="agent-card agent-coordinator">
         <div class="agent-card-head">
-          <span class="agent-role">{{ coordinator.role }}</span>
+          <span class="agent-role">{{ coordinator.role_title }}</span>
           <h3>{{ coordinator.display_name }}</h3>
         </div>
         <p>{{ coordinator.description }}</p>
@@ -37,7 +138,7 @@
       <div class="org-branch">
         <div class="agent-card agent-specialist agent-specialist-{{ loop.index0 % 5 }}">
           <div class="agent-card-head">
-            <span class="agent-role">{{ agent.role }}</span>
+            <span class="agent-role">{{ agent.role_title }}</span>
             <h3>{{ agent.display_name }}</h3>
           </div>
           <p>{{ agent.description }}</p>
@@ -56,13 +157,14 @@
     {% endif %}
   </div>
 </section>
+{% endif %}
 
 <section>
   <div class="section-head">
     <div class="section-head-text">
       <p class="eyebrow">Delivery pipeline</p>
       <h2>Projects</h2>
-      <p class="muted">Each project is one BRD + Technical Design Document delivery. Run it on demand, or give it a schedule.</p>
+      <p class="muted">Each project runs its assigned team's full delivery. Run it on demand, or give it a schedule.</p>
     </div>
   </div>
 
@@ -71,6 +173,7 @@
     <thead>
       <tr>
         <th>Project</th>
+        <th>Team</th>
         <th>Brief</th>
         <th>Schedule</th>
         <th></th>
@@ -80,6 +183,7 @@
       {% for p in projects %}
       <tr>
         <td><strong>{{ p['name'] }}</strong></td>
+        <td>{{ p['team_id'] and (teams | selectattr('id', 'equalto', p['team_id']) | map(attribute='name') | first) or '—' }}</td>
         <td class="brief-cell">
           <button type="button" class="brief-preview" data-brief-id="brief-{{ p['id'] }}" data-project-name="{{ p['name'] }}">
             {{ p['brief'][:50] }}{% if p['brief']|length > 50 %}&hellip;{% endif %}
@@ -88,11 +192,7 @@
         </td>
         <td>
           {% if p['schedule_enabled'] %}
-            {% if p['cron_expression'] %}
-              <span class="pill pill-ok">cron: {{ p['cron_expression'] }}</span>
-            {% else %}
-              <span class="pill pill-ok">every {{ p['interval_minutes'] }} min</span>
-            {% endif %}
+            <span class="pill pill-ok">{{ p['schedule_summary'] or 'scheduled' }}</span>
           {% else %}
             <span class="pill pill-pending">manual only</span>
           {% endif %}
@@ -103,15 +203,9 @@
           </form>
           <details>
             <summary>Schedule</summary>
-            <form method="post" action="{{ url_for('dashboard.update_schedule', project_id=p['id']) }}" class="schedule-form">
-              <label>Cron expression
-                <input type="text" name="cron_expression" placeholder="0 6 * * *" value="{{ p['cron_expression'] or '' }}">
-              </label>
-              <span class="muted">or</span>
-              <label>Every N minutes
-                <input type="number" name="interval_minutes" min="5" placeholder="60" value="{{ p['interval_minutes'] or '' }}">
-              </label>
-              <button type="submit" class="btn">Save schedule</button>
+            <form method="post" action="{{ url_for('dashboard.update_schedule', project_id=p['id']) }}">
+              {{ schedule_picker(p) }}
+              <button type="submit" class="btn" style="margin-top: var(--sp-2);">Save schedule</button>
             </form>
           </details>
           <form method="post" action="{{ url_for('dashboard.delete_project', project_id=p['id']) }}"
@@ -121,11 +215,11 @@
         </td>
       </tr>
       {% else %}
-      <tr class="empty-row"><td colspan="4">
+      <tr class="empty-row"><td colspan="5">
         <div class="empty-state">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 4v5"/></svg>
           <strong>No projects yet</strong>
-          <span>Add your first project below - give it a name and a brief, and the delivery team takes it from there.</span>
+          <span>Add your first project below - give it a team, a name, and a brief, and the delivery team takes it from there.</span>
         </div>
       </td></tr>
       {% endfor %}
@@ -133,9 +227,20 @@
   </table>
   </div>
 
-  <details class="new-project">
+  <details class="new-project" {{ 'open' if not teams }}>
     <summary>+ New project</summary>
     <form method="post" action="{{ url_for('dashboard.create_project') }}" class="new-project-form" id="new-project-form" novalidate>
+      <label>Team
+        <select name="team_id" required {{ 'disabled' if not teams }}>
+          {% for t in teams %}
+          <option value="{{ t['id'] }}" {{ 'selected' if t['id'] == selected_team_id }}>{{ t['name'] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if not teams %}
+      <span class="field-error">Create a team before you can create a project.</span>
+      {% endif %}
+
       <label>Project name
         <input type="text" name="name" required placeholder="Boutique Coffee Roastery Website">
       </label>
@@ -150,19 +255,12 @@
         <textarea name="brief" id="brief-field-value" hidden></textarea>
       </div>
 
-      <div class="schedule-form">
-        <label>Cron expression (optional)
-          <input type="text" name="cron_expression" placeholder="0 6 * * 1">
-        </label>
-        <span class="muted">or</span>
-        <label>Every N minutes (optional)
-          <input type="number" name="interval_minutes" min="5" placeholder="blank = manual only">
-        </label>
-      </div>
+      <div class="field-label" style="margin-top: var(--sp-2);">Schedule (optional)</div>
+      {{ schedule_picker(None) }}
 
       <div class="new-project-actions">
         <button type="button" class="btn" id="cancel-new-project">Cancel</button>
-        <button type="submit" class="btn btn-primary">Create project</button>
+        <button type="submit" class="btn btn-primary" {{ 'disabled' if not teams }}>Create project</button>
       </div>
     </form>
   </details>
@@ -182,6 +280,7 @@
     <thead>
       <tr>
         <th>Project</th>
+        <th>Team</th>
         <th>Trigger</th>
         <th>Status</th>
         <th>Satisfied</th>
@@ -196,6 +295,7 @@
       {% for r in runs %}
       <tr data-run-id="{{ r['id'] }}">
         <td>{{ r['project_name'] }}</td>
+        <td>{{ r['team_name'] or '—' }}</td>
         <td>{{ r['trigger_type'] }}</td>
         <td class="run-status status-{{ r['status'] }}">{{ r['status'] }}</td>
         <td>{{ 'yes' if r['satisfied'] == 1 else ('no' if r['satisfied'] == 0 else '—') }}</td>
@@ -204,6 +304,7 @@
         <td>
           {% if r['brd_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='brd') }}" title="{{ r['brd_path'] }}" target="_blank" rel="noopener">BRD</a>{% endif %}
           {% if r['tdd_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='tdd') }}" title="{{ r['tdd_path'] }}" target="_blank" rel="noopener">TDD</a>{% endif %}
+          {% if r['site_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='site') }}" title="{{ r['site_path'] }}">Site (.zip)</a>{% endif %}
         </td>
         <td class="run-error">
           {% if r['error'] %}
@@ -228,7 +329,7 @@
         </td>
       </tr>
       {% else %}
-      <tr class="empty-row"><td colspan="9">
+      <tr class="empty-row"><td colspan="10">
         <div class="empty-state">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 8v4l2.5 2.5"/><circle cx="12" cy="12" r="9"/></svg>
           <strong>No runs yet</strong>
@@ -246,15 +347,14 @@
     <div class="section-head-text">
       <p class="eyebrow">Housekeeping</p>
       <h2>Danger zone</h2>
-      <p class="muted">Everything this app has created on the Managed Agents platform - agents, the shared environment, memory stores, and every session from every run above. Use this when you're done experimenting and want to stop it from costing anything further.</p>
+      <p class="muted">Everything every team has created on the Managed Agents platform - agents, the shared environment, memory stores, and every session from every run above. Use this when you're done experimenting and want to stop it from costing anything further.</p>
     </div>
   </div>
 
   <div class="danger-zone-card">
     <div class="teardown-summary">
-      <span class="pill {{ 'pill-ok' if agent_ids.get(coordinator.cache_key) else 'pill-pending' }}">{{ coordinator.display_name }}{{ ' (created)' if agent_ids.get(coordinator.cache_key) else ' (not created)' }}</span>
-      {% for agent in specialists %}
-      <span class="pill {{ 'pill-ok' if agent_ids.get(agent.cache_key) else 'pill-pending' }}">{{ agent.display_name }}{{ ' (created)' if agent_ids.get(agent.cache_key) else ' (not created)' }}</span>
+      {% for m in all_team_members %}
+      <span class="pill {{ 'pill-ok' if agent_ids.get(m.cache_key) else 'pill-pending' }}">{{ m.team_name }}: {{ m.display_name }}{{ ' (created)' if agent_ids.get(m.cache_key) else ' (not created)' }}</span>
       {% endfor %}
       <span class="pill {{ 'pill-ok' if agent_ids.get('environment_id') else 'pill-pending' }}">environment{{ ' (created)' if agent_ids.get('environment_id') else ' (not created)' }}</span>
       <span class="pill {{ 'pill-ok' if agent_ids.get('org_standards_id') else 'pill-pending' }}">org-standards memory{{ ' (created)' if agent_ids.get('org_standards_id') else ' (not created)' }}</span>
@@ -272,12 +372,12 @@
       <button type="button" class="modal-close" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
-      <p>This will, best-effort, remove everything this app created on Managed Agents:</p>
+      <p>This will, best-effort, remove everything every team created on Managed Agents:</p>
       <ul>
         <li><strong>{{ session_count }}</strong> session{{ 's' if session_count != 1 else '' }} - deleted permanently, including anything they produced that wasn't already downloaded.</li>
         <li>The shared <strong>environment</strong> - deleted.</li>
         <li>The <strong>org-standards</strong> memory store and every per-project memory store - deleted.</li>
-        <li><strong>{{ coordinator.display_name }}</strong>{% for agent in specialists %}, <strong>{{ agent.display_name }}</strong>{% endfor %} - Managed Agents has no agent delete, only <strong>archive</strong>. This is permanent and read-only forever; there is no unarchive.</li>
+        <li>Every team's agents ({% for m in all_team_members %}<strong>{{ m.display_name }}</strong>{{ ', ' if not loop.last }}{% endfor %}) - Managed Agents has no agent delete, only <strong>archive</strong>. This is permanent and read-only forever; there is no unarchive.</li>
       </ul>
       <p>A currently running run must be stopped first - this refuses to run while one is in progress.</p>
       <form method="post" action="{{ url_for('dashboard.teardown') }}">
@@ -324,6 +424,39 @@
 </div>
 
 <script>
+// Schedule picker: show only the fields relevant to the chosen frequency
+// (interval / weekday / month-day / the whole time row) and, within the
+// time row, only the 12h or 24h hour fields. Runs once per
+// .schedule-picker on the page (the new-project form has one, and every
+// project row's per-row schedule-edit form has its own).
+function initSchedulePicker(picker) {
+  const freqSelect = picker.querySelector('.sp-frequency');
+  const timeModeSelect = picker.querySelector('.sp-time-mode');
+  if (!freqSelect) return;
+
+  function apply() {
+    const freq = freqSelect.value;
+    picker.querySelectorAll('.sp-field').forEach((el) => { el.hidden = true; });
+    if (freq === 'interval') {
+      picker.querySelector('.sp-field-interval').hidden = false;
+    } else if (freq === 'daily' || freq === 'weekly' || freq === 'monthly') {
+      picker.querySelector('.sp-field-time').hidden = false;
+      if (freq === 'weekly') picker.querySelector('.sp-field-weekday').hidden = false;
+      if (freq === 'monthly') picker.querySelector('.sp-field-monthday').hidden = false;
+    }
+    if (timeModeSelect) {
+      const is12h = timeModeSelect.value === '12h';
+      picker.querySelectorAll('.sp-hour24').forEach((el) => { el.hidden = is12h; });
+      picker.querySelectorAll('.sp-hour12').forEach((el) => { el.hidden = !is12h; });
+    }
+  }
+
+  freqSelect.addEventListener('change', apply);
+  if (timeModeSelect) timeModeSelect.addEventListener('change', apply);
+  apply();
+}
+document.querySelectorAll('.schedule-picker').forEach(initSchedulePicker);
+
 // Brief popup: each row's full brief lives in a hidden <template>, so no
 // escaping headaches with long/quote-heavy text in an HTML attribute. Click
 // the truncated preview button to populate and show the shared modal.

@@ -11,42 +11,62 @@ opening a notebook.
 
 ## What this is
 
-This app calls the *same* Managed Agents logic as
+This app started from the *same* Managed Agents logic as
 `../labs/ClaudeMultiAgent_ManagedAgent/ClaudeMultiAgent_ManagedAgent.ipynb` - a coordinator agent
-("Delivery Lead") delegates to two specialists (Roger the Business
-Analyst, Michael the Solution Architect), two memory stores ride along, an
-outcome rubric grades the result and loops on failure, and the coordinator
-files both finished documents to Google Docs and posts Slack updates via
-vault-backed MCP servers. `pipeline.py` factors that logic out of the
-notebook so it can run headless - triggered by a dashboard button click or
-a scheduler tick, instead of a person stepping through notebook cells.
+delegates to specialists, two memory stores ride along, an outcome rubric
+grades the result and loops on failure, and the coordinator files finished
+documents to Google Docs and posts Slack updates via vault-backed MCP
+servers. `pipeline.py` factors that logic out of the notebook so it can
+run headless - triggered by a dashboard button click or a scheduler tick,
+instead of a person stepping through notebook cells.
+
+Since then, the fixed two-specialist roster has become a **DB-backed
+catalog of agent roles + Teams**: an `agent_specs` table holds every
+available role (Delivery Lead, Business Analyst "Roger", Solution
+Architect "Michael", and a full-stack Developer "Smith" who turns a
+Technical Design Document into a locally-runnable website), and a "Team"
+is a named, described snapshot of that catalog that a project picks
+before it can run. See "Teams and the agent catalog" below and
+`docs/multi-agent-teams.md` for the full design.
 
 The problem this solves: the notebook is great, but a notebook can't
-be clicked by someone who isn't a developer, and it can't run itself at
-6am on a schedule. Agent Console turns that same pipeline into an
-always-available internal tool with a UI.
+be clicked by someone who isn't a developer, it can't run itself at 6am
+on a schedule, and it can't offer more than one fixed pipeline shape.
+Agent Console turns the same underlying platform primitives into an
+always-available internal tool with a UI, multiple reusable teams, and a
+non-technical scheduling picker.
 
 ## What you get
 
 - **Login** - one username/password from environment variables, session
   cookie. Not multi-user; this is your own personal console.
-- **Agent roster view** - an org chart, not a flat list: Delivery Lead
-  (coordinator) on top, every specialist (Roger the BA, Michael the
-  Architect, and any role added later) on the level below, each with role,
-  description, tools, and whether it's been created yet on the Managed
-  Agents platform. The roster is read live from `pipeline.py`'s
-  `SPECIALISTS` list - adding a new specialist there adds a new card here
-  automatically, no dashboard code changes required.
-- **Projects** - each project is one website brief. Click "Run now" for an
-  on-demand delivery, or give it a cron expression / an interval so it
-  runs automatically.
-- **Run history** - every run (manual or scheduled), its status, whether
-  the outcome rubric was satisfied, an estimated cost, and where the BRD
-  and Technical Design Document were saved. The table polls itself every
-  4 seconds so a "running" row updates to "success"/"failed" without a
-  page reload. A running row's cost also refreshes every 30 seconds with a
-  live estimate straight from the platform (marked "(live)"), not just the
-  final number once the run finishes.
+- **Agents catalog** (sidebar: Agents) - a read-only view of every agent
+  role available, its description, skills, and default tools.
+- **Teams** (sidebar: Teams) - create a named, described team; it's
+  bundled with every role currently in the catalog (Delivery Lead +
+  Business Analyst + Solution Architect + Developer). A team can't be
+  deleted while a project still uses it.
+- **Agent Specs** (sidebar: Agent Specs) - edit a role's description,
+  skills, and system prompt, with a rule-based "Validate" check before
+  saving. Editing a spec only affects *new* teams - a team's
+  already-provisioned agent keeps the prompt/skills it was created with.
+- **Dashboard org chart** - pick a team at the top of the dashboard and
+  its actual members render below as an org chart: coordinator on top,
+  every specialist on the level below, each with role, description,
+  tools, and whether it's been created yet on the Managed Agents platform.
+- **Projects** - each project picks a team, then a website brief. Click
+  "Run now" for an on-demand delivery, or set a plain-language schedule
+  (every day / every week on a chosen day / every month on a chosen day /
+  every N minutes, 12- or 24-hour clock) so it runs automatically - no
+  cron syntax.
+- **Run history** - every run (manual or scheduled), which team ran it,
+  its status, whether the outcome rubric was satisfied, an estimated
+  cost, and where the BRD, Technical Design Document, and/or website
+  zip were saved. The table polls itself every 4 seconds so a "running"
+  row updates to "success"/"failed" without a page reload. A running
+  row's cost also refreshes every 30 seconds with a live estimate
+  straight from the platform (marked "(live)"), not just the final
+  number once the run finishes.
 - **Stop / Delete on each run** - a running row gets a **Stop** button
   (marks it failed immediately; see "Stopping a run" below for what this
   does and doesn't guarantee), a finished row gets a **Delete** button to
@@ -88,12 +108,12 @@ order the platform requires:
    platform won't delete an environment anything still references.)
 3. **Every memory store** - the org-standards store plus every per-project
    store - deleted.
-4. **The agents** (coordinator + every specialist) - **archived**, not
-   deleted. Managed Agents has no agent-delete endpoint, only archive,
-   which is permanent: the agent becomes read-only forever and there's no
-   way to unarchive it. This is a platform limitation, not a design choice
-   here - archiving still stops the agent from being usable for any new
-   session, which is what matters for cost.
+4. **The agents** - every team's coordinator and every specialist -
+   **archived**, not deleted. Managed Agents has no agent-delete endpoint,
+   only archive, which is permanent: the agent becomes read-only forever
+   and there's no way to unarchive it. This is a platform limitation, not
+   a design choice here - archiving still stops the agent from being
+   usable for any new session, which is what matters for cost.
 
 After teardown, the local agent cache is cleared automatically, so the
 next run creates everything fresh rather than trying to reuse
@@ -115,17 +135,20 @@ skipped (nothing cached to remove), and what failed.
 ## Architecture, in one paragraph
 
 `app.py` is the Flask app factory. `auth.py` gates every dashboard route
-behind a session-based login. `dashboard.py` holds the routes for viewing
-the roster, creating/running/scheduling/deleting projects, and two small
-JSON endpoints the page polls. `run_manager.py` starts each pipeline run
-in a background thread (so an HTTP request never blocks on a minute-long
-agent run) and records live progress events in memory plus the final
-result in SQLite via `db.py`. `scheduler.py` wraps APScheduler so enabled
-project schedules run automatically, even if nobody is looking at the
-dashboard. `pipeline.py` is the actual Managed Agents logic - agent/
-environment/session creation, the outcome-driven run, file downloads -
-factored out of the notebook so both a button click and a cron tick can
-call the same code.
+behind a session-based login. `dashboard.py` holds the routes for the
+agents catalog, teams, agent-spec editing, project CRUD, run triggering,
+schedule forms, and the JSON endpoints the page polls. `run_manager.py`
+starts each pipeline run in a background thread (so an HTTP request never
+blocks on a minute-long agent run), loads the project's team via
+`db.get_team_with_members`, and records live progress events in memory
+plus the final result in SQLite via `db.py`. `scheduler.py` wraps
+APScheduler so enabled project schedules run automatically, translating
+the dashboard's plain-language picker into real `CronTrigger`/
+`IntervalTrigger` objects. `pipeline.py` is the actual Managed Agents
+logic - team-driven agent/environment/session creation, the dynamically
+assembled coordinator prompt and rubric, the outcome-driven run, file
+downloads - built on the same primitives as the notebook but generalized
+to any team composition instead of one fixed pair of specialists.
 
 ## Files
 
@@ -134,62 +157,83 @@ call the same code.
 | `app.py` | Flask app factory, blueprint registration, scheduler startup |
 | `config.py` | All settings, read from environment variables |
 | `auth.py` | Single-user login, `login_required` decorator |
-| `dashboard.py` | Routes: roster view, project CRUD, run trigger, schedule form, JSON polling |
+| `dashboard.py` | Routes: agents catalog, teams, agent-spec editor, project CRUD, run trigger, schedule form, JSON polling |
 | `run_manager.py` | Background-thread run orchestration, in-memory live log, SQLite result persistence |
-| `pipeline.py` | The actual Managed Agents logic - same as `ClaudeMultiAgent_ManagedAgent.ipynb`, callable headlessly |
-| `scheduler.py` | APScheduler wiring - cron/interval jobs per project |
-| `db.py` | SQLite schema and queries for `projects` and `runs` |
-| `templates/` | `base.html`, `login.html`, `dashboard.html` |
+| `pipeline.py` | The team-driven Managed Agents logic - agent/environment/session creation, dynamic coordinator prompt + rubric assembly, callable headlessly |
+| `scheduler.py` | APScheduler wiring - parses the dashboard's structured schedule fields into daily/weekly/monthly/interval triggers |
+| `db.py` | SQLite schema and queries for `agent_specs`, `teams`, `team_members`, `projects`, and `runs` |
+| `agent_specs_seed.py` | Default catalog (Delivery Lead, Roger, Michael, Smith) seeded into `agent_specs` on first startup |
+| `templates/` | `base.html` (topbar + sidebar shell), `login.html`, `dashboard.html`, `agents.html`, `teams.html`, `team_new.html`, `agent_specs.html`, `agent_spec_edit.html` |
 | `static/style.css` | All styling - no CSS framework |
 | `tests/test_smoke.py` | End-to-end test with a mocked pipeline - no API key needed |
 | `RUNBOOK.md` | Numbered, step-by-step setup and operating instructions |
+| `docs/multi-agent-teams.md` | Full design notes for the agent catalog / teams / Developer role / scheduler feature |
 
-## Customizing the agent roster
+## Teams and the agent catalog
 
-The roster is one level deep by platform design: **Delivery Lead**
-(coordinator) on top, every specialist underneath it, delegating never goes
-further than that. Both agent creation and the dashboard's org chart read
-the same two objects from `pipeline.py`, so there's exactly one place to
-edit:
+The old fixed two-specialist roster (`pipeline.COORDINATOR`/
+`pipeline.SPECIALISTS` Python constants) is gone, replaced by a DB-backed
+model:
 
-1. Write the new role's system prompt as a new constant in
-   `../labs/shared/prompts.py` (follow `BA_SPECIALIST_SYSTEM` or
-   `ARCHITECT_SPECIALIST_SYSTEM` as a template - non-interactive, makes
-   labeled assumptions instead of asking questions, writes its output to a
-   fixed path).
-2. Import that constant at the top of `pipeline.py`, then append one entry
-   to `SPECIALISTS`:
-   ```python
-   {
-       "key": "dev",
-       "cache_key": "dev_id",
-       "agent_name": "Delivery Developer (Dana)",
-       "display_name": "Dana",
-       "role": "Developer",
-       "description": "Turns the Technical Design Document into a scaffolded repo.",
-       "system": DEVELOPER_SPECIALIST_SYSTEM,
-       "tools_label": "write, read, bash (scoped)",
-       "tools": [...],  # omit to reuse the default write/read-only toolset
-   }
-   ```
-3. Update `DELIVERY_COORDINATOR_SYSTEM`'s numbered steps in `prompts.py` so
-   the coordinator's own instructions say when to delegate to the new
-   specialist and what to hand it - that's a workflow description in
-   English, not something the roster list can infer on its own.
-
-That's it. `_get_or_create_agents()` will create and cache the new agent,
-add it to the coordinator's `multiagent.agents` roster, and the dashboard's
-org chart will render a new card at the specialist level automatically -
-no changes to `dashboard.py`, `dashboard.html`, or `style.css` needed
-(colors cycle through a 5-color palette by roster position). Delete the
-existing `agent_cache.json` file (or the matching key from it) first if
-you want a role's agent recreated from scratch rather than reused.
+- **`agent_specs`** is the catalog - one row per available role
+  (`delivery_lead`, `business_analyst`, `solution_architect`,
+  `developer`), each with a `system_prompt`, `handoff_instructions` (used
+  to build the coordinator's delegation step - see below), `skills`, and
+  `tools_label`. Seeded once, on first startup, from
+  `agent_specs_seed.py`. Edit a row's text/skills/prompt from the
+  dashboard's **Agent Specs** page (with a rule-based "Validate" check);
+  `role_key` and coordinator status aren't editable there.
+- **`teams`** + **`team_members`** - creating a team (**Teams** page)
+  snapshots every current `agent_specs` row into `team_members` at that
+  moment. This means editing the catalog later only affects teams created
+  *after* the edit - an existing team's already-provisioned platform
+  agent keeps whatever prompt it was created with (same
+  recreate-to-update caveat "Customizing... below always had, just now
+  scoped per team instead of globally). Each member gets a
+  team-namespaced `cache_key` (`team<id>_<role_key>`) in
+  `data/agent_cache.json`, so two teams both having e.g. a
+  `business_analyst` never collide.
+- **Adding a fifth role** (a QA agent, say): write its system prompt in
+  `../labs/shared/prompts.py` (additive only - see the note at the top of
+  that file about the notebook depending on the existing constants),
+  add a matching entry to `agent_specs_seed.py`'s `DEFAULT_AGENT_SPECS`,
+  then either wipe `data/agent_console.sqlite3`'s `agent_specs` table to
+  reseed, or insert the row directly. New teams created afterward will
+  include it automatically; existing teams won't.
+- **The coordinator's system prompt is assembled at agent-creation time**,
+  not stored verbatim: `pipeline._build_coordinator_system()` takes the
+  coordinator's stored template (which contains the literal tokens
+  `{{DELEGATION_STEPS}}` and `{{CLOSING_STEPS}}`) and substitutes in a
+  numbered delegation list built from each specialist's
+  `handoff_instructions`, plus closing steps that are conditional on the
+  team's actual composition (e.g. a Developer-only team's coordinator
+  isn't told to file a BRD nobody produced).
+- **The Developer role ("Smith")** gets the full, unscoped tool set
+  (including bash) instead of the BA/Architect's scoped write/read-only
+  set, because it needs to install dependencies and run a local dev/build
+  command. The shared sandbox environment's `allowed_hosts` includes the
+  npm/PyPI/Maven/NuGet registries and GitHub, and
+  `allow_package_managers` is enabled - broadened once, in place, for
+  every team (see `docs/multi-agent-teams.md` for the reasoning). Smith
+  packages the finished site as `/mnt/session/outputs/site.zip`, which the
+  dashboard serves as a `.zip` download next to the BRD/TDD links.
 
 ## How scheduling actually works
 
 This app uses **its own scheduler** (`APScheduler`'s `BackgroundScheduler`,
 running inside the Flask process), not the Managed Agents platform's
-native Scheduled Deployments feature. Schedules are fully visible and
+native Scheduled Deployments feature. There's no cron syntax in the UI:
+the dashboard's schedule picker collects a frequency (daily / weekly on a
+chosen weekday / monthly on a chosen day-of-month / every N minutes), a
+12- or 24-hour clock, and hour/minute/second, and `scheduler.parse_schedule_form()`
+turns that into a structured schedule stored on the `projects` row
+(`schedule_frequency`, `schedule_weekday`, `schedule_month_day`,
+`schedule_hour`, `schedule_minute`, `schedule_second` - hour always stored
+in 24-hour canonical form regardless of which clock mode was used to
+enter it). `scheduler.add_or_update_job()` builds a real APScheduler
+`CronTrigger`/`IntervalTrigger` directly from those fields (weekday
+matched by name, e.g. `'wed'`, not by number, to avoid any
+Sunday-vs-Monday-first ambiguity). Schedules are fully visible and
 editable from this dashboard, but the Flask process must be running for
 scheduled runs to fire - see RUNBOOK.md Step 11 for what that means in
 practice and how to keep it running unattended.

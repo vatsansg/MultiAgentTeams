@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Agent Specs - Agent Console{% endblock %}
+{% block content %}
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">Catalog</p>
+      <h2>Agent Specs</h2>
+      <p class="muted">Edit a role's description, skills, and system prompt. Changes only apply to teams created after the change - a team's already-provisioned agent keeps the prompt it was created with.</p>
+    </div>
+  </div>
+
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th>Description</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for spec in specs %}
+        <tr>
+          <td>{{ spec.role_title }}{% if spec.is_coordinator %} <span class="pill pill-ok">coordinator</span>{% endif %}</td>
+          <td>{{ spec.display_name }}</td>
+          <td class="brief-cell">{{ spec.description }}</td>
+          <td class="actions">
+            <a class="btn" href="{{ url_for('dashboard.edit_agent_spec', spec_id=spec.id) }}">Edit</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr class="empty-row">
+          <td colspan="4">
+            <div class="empty-state">
+              <strong>No agent specs yet</strong>
+              <span>The catalog should seed automatically on first startup.</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

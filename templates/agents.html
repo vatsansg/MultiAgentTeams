@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Agents - Agent Console{% endblock %}
+{% block content %}
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">Catalog</p>
+      <h2>Agents</h2>
+      <p class="muted">Every agent role available to a team, with its skills and default tools. This is a read-only reference - to change what a role actually does, edit it under Agent Specs.</p>
+    </div>
+  </div>
+
+  {% if specs %}
+  <div class="org-level-specialists" style="flex-wrap: wrap; justify-content: flex-start; padding-top: 0;">
+    {% for spec in specs %}
+    <div class="agent-card {{ 'agent-coordinator' if spec.is_coordinator else 'agent-specialist-' ~ (loop.index0 % 5) }}">
+      <div class="agent-card-head">
+        <span class="agent-role">{{ spec.role_title }}</span>
+        <h3>{{ spec.display_name }}</h3>
+      </div>
+      <p>{{ spec.description }}</p>
+      <div class="agent-meta">
+        <span>tools: <span class="tools-label">{{ spec.tools_label }}</span></span>
+      </div>
+      {% if spec.skills %}
+      <div class="skill-chip-list" style="margin-top: var(--sp-3);">
+        {% for skill in spec.skills %}
+        <span class="skill-chip">{{ skill }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <strong>No agent specs yet</strong>
+    <span>The catalog should seed automatically on first startup - restart the app if this looks empty.</span>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

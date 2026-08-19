@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Teams - Agent Console{% endblock %}
+{% block content %}
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">Teams</p>
+      <h2>Teams</h2>
+      <p class="muted">A team bundles a chosen set of agent roles (the coordinator plus whichever specialists you pick) under a name and description. Projects pick a team on the dashboard.</p>
+    </div>
+    <a class="btn btn-primary" href="{{ url_for('dashboard.new_team') }}">+ Create team</a>
+  </div>
+
+  {% if team_views %}
+  <div class="org-level-specialists" style="flex-wrap: wrap; justify-content: flex-start; padding-top: 0; gap: var(--sp-4);">
+    {% for view in team_views %}
+    <div class="surface-card" style="padding: var(--sp-5); width: 100%; max-width: 360px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-2);">
+        <h3 style="margin: 0 0 4px;">{{ view.team.name }}</h3>
+        {% if view.in_use %}
+        <span class="pill pill-ok">in use</span>
+        {% else %}
+        <span class="pill pill-pending">unused</span>
+        {% endif %}
+      </div>
+      {% if view.team.description %}
+      <p class="muted" style="margin: 0 0 var(--sp-3);">{{ view.team.description }}</p>
+      {% endif %}
+      <div class="agent-meta" style="margin-bottom: var(--sp-3);">
+        {% for m in view.members %}
+        <span>{{ m.display_name }} &middot; {{ m.role_title }}</span>
+        {% endfor %}
+      </div>
+      <div class="actions">
+        <a class="btn" href="{{ url_for('dashboard.edit_team', team_id=view.team.id) }}">Edit</a>
+        <form method="post" action="{{ url_for('dashboard.delete_team', team_id=view.team.id) }}" onsubmit="return confirm('Delete team \'{{ view.team.name }}\'? This cannot be undone.');">
+          <button type="submit" class="btn btn-danger" {{ 'disabled' if view.in_use }}>Delete</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <strong>No teams yet</strong>
+    <span>Create a team to get a Delivery Lead, Business Analyst, Solution Architect, and Developer bundled together for your projects.</span>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
