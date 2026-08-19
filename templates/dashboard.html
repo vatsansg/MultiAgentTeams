@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Agent Console{% endblock %}
+{% block content %}
+
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">Delivery team</p>
+      <h2>Agent roster</h2>
+      <p class="muted">One coordinator, one level of specialists below it - the coordinator delegates to every specialist shown here on each run. Agent ids appear once a run has created them.</p>
+    </div>
+  </div>
+
+  <div class="org-chart">
+    <div class="org-level org-level-coordinator">
+      <div class="agent-card agent-coordinator">
+        <div class="agent-card-head">
+          <span class="agent-role">{{ coordinator.role }}</span>
+          <h3>{{ coordinator.display_name }}</h3>
+        </div>
+        <p>{{ coordinator.description }}</p>
+        <div class="agent-meta">
+          <span>tools: <span class="tools-label">{{ coordinator.tools_label }}</span></span>
+          {% if agent_ids.get(coordinator.cache_key) %}
+            <span class="pill pill-ok">created &middot; {{ agent_ids.get(coordinator.cache_key) }}</span>
+          {% else %}
+            <span class="pill pill-pending">not created yet</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% if specialists %}
+    <div class="org-connector"></div>
+    <div class="org-level org-level-specialists">
+      {% for agent in specialists %}
+      <div class="org-branch">
+        <div class="agent-card agent-specialist agent-specialist-{{ loop.index0 % 5 }}">
+          <div class="agent-card-head">
+            <span class="agent-role">{{ agent.role }}</span>
+            <h3>{{ agent.display_name }}</h3>
+          </div>
+          <p>{{ agent.description }}</p>
+          <div class="agent-meta">
+            <span>tools: <span class="tools-label">{{ agent.tools_label }}</span></span>
+            {% if agent_ids.get(agent.cache_key) %}
+              <span class="pill pill-ok">created &middot; {{ agent_ids.get(agent.cache_key) }}</span>
+            {% else %}
+              <span class="pill pill-pending">not created yet</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">Delivery pipeline</p>
+      <h2>Projects</h2>
+      <p class="muted">Each project is one BRD + Technical Design Document delivery. Run it on demand, or give it a schedule.</p>
+    </div>
+  </div>
+
+  <div class="table-scroll">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Brief</th>
+        <th>Schedule</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in projects %}
+      <tr>
+        <td><strong>{{ p['name'] }}</strong></td>
+        <td class="brief-cell">
+          <button type="button" class="brief-preview" data-brief-id="brief-{{ p['id'] }}" data-project-name="{{ p['name'] }}">
+            {{ p['brief'][:50] }}{% if p['brief']|length > 50 %}&hellip;{% endif %}
+          </button>
+          <template id="brief-{{ p['id'] }}">{{ p['brief'] }}</template>
+        </td>
+        <td>
+          {% if p['schedule_enabled'] %}
+            {% if p['cron_expression'] %}
+              <span class="pill pill-ok">cron: {{ p['cron_expression'] }}</span>
+            {% else %}
+              <span class="pill pill-ok">every {{ p['interval_minutes'] }} min</span>
+            {% endif %}
+          {% else %}
+            <span class="pill pill-pending">manual only</span>
+          {% endif %}
+        </td>
+        <td class="actions">
+          <form method="post" action="{{ url_for('dashboard.run_project', project_id=p['id']) }}">
+            <button type="submit" class="btn btn-primary">Run now</button>
+          </form>
+          <details>
+            <summary>Schedule</summary>
+            <form method="post" action="{{ url_for('dashboard.update_schedule', project_id=p['id']) }}" class="schedule-form">
+              <label>Cron expression
+                <input type="text" name="cron_expression" placeholder="0 6 * * *" value="{{ p['cron_expression'] or '' }}">
+              </label>
+              <span class="muted">or</span>
+              <label>Every N minutes
+                <input type="number" name="interval_minutes" min="5" placeholder="60" value="{{ p['interval_minutes'] or '' }}">
+              </label>
+              <button type="submit" class="btn">Save schedule</button>
+            </form>
+          </details>
+          <form method="post" action="{{ url_for('dashboard.delete_project', project_id=p['id']) }}"
+                onsubmit="return confirm('Delete this project and its schedule?');">
+            <button type="submit" class="btn btn-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr class="empty-row"><td colspan="4">
+        <div class="empty-state">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 4v5"/></svg>
+          <strong>No projects yet</strong>
+          <span>Add your first project below - give it a name and a brief, and the delivery team takes it from there.</span>
+        </div>
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <details class="new-project">
+    <summary>+ New project</summary>
+    <form method="post" action="{{ url_for('dashboard.create_project') }}" class="new-project-form" id="new-project-form" novalidate>
+      <label>Project name
+        <input type="text" name="name" required placeholder="Boutique Coffee Roastery Website">
+      </label>
+
+      <div class="brief-field">
+        <span class="field-label">Project brief</span>
+        <div class="brief-field-box">
+          <p class="brief-field-preview is-empty" id="brief-field-preview">No brief written yet.</p>
+          <button type="button" class="btn" id="open-brief-editor">Write brief&hellip;</button>
+        </div>
+        <span class="field-error" id="brief-field-error" hidden>Add a project brief before creating the project.</span>
+        <textarea name="brief" id="brief-field-value" hidden></textarea>
+      </div>
+
+      <div class="schedule-form">
+        <label>Cron expression (optional)
+          <input type="text" name="cron_expression" placeholder="0 6 * * 1">
+        </label>
+        <span class="muted">or</span>
+        <label>Every N minutes (optional)
+          <input type="number" name="interval_minutes" min="5" placeholder="blank = manual only">
+        </label>
+      </div>
+
+      <div class="new-project-actions">
+        <button type="button" class="btn" id="cancel-new-project">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create project</button>
+      </div>
+    </form>
+  </details>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">Activity</p>
+      <h2>Run history</h2>
+      <p class="muted">Every run triggered manually or by a schedule, newest first. Updates live while a run is in progress.</p>
+    </div>
+  </div>
+
+  <div class="table-scroll">
+  <table class="table" id="runs-table">
+    <thead>
+      <tr>
+        <th>Project</th>
+        <th>Trigger</th>
+        <th>Status</th>
+        <th>Satisfied</th>
+        <th>Cost (est.)</th>
+        <th>Started</th>
+        <th>Files</th>
+        <th>Error</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr data-run-id="{{ r['id'] }}">
+        <td>{{ r['project_name'] }}</td>
+        <td>{{ r['trigger_type'] }}</td>
+        <td class="run-status status-{{ r['status'] }}">{{ r['status'] }}</td>
+        <td>{{ 'yes' if r['satisfied'] == 1 else ('no' if r['satisfied'] == 0 else '—') }}</td>
+        <td class="run-cost">{{ '$%.4f' % r['cost_usd'] if r['cost_usd'] is not none else '—' }}</td>
+        <td>{{ r['started_at'] }}</td>
+        <td>
+          {% if r['brd_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='brd') }}" title="{{ r['brd_path'] }}" target="_blank" rel="noopener">BRD</a>{% endif %}
+          {% if r['tdd_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='tdd') }}" title="{{ r['tdd_path'] }}" target="_blank" rel="noopener">TDD</a>{% endif %}
+        </td>
+        <td class="run-error">
+          {% if r['error'] %}
+          <details>
+            <summary class="error-summary">{{ r['error'][:60] }}{% if r['error']|length > 60 %}&hellip;{% endif %}</summary>
+            <pre class="error-full">{{ r['error'] }}</pre>
+          </details>
+          {% else %}—{% endif %}
+        </td>
+        <td class="run-actions">
+          {% if r['status'] == 'running' %}
+          <form method="post" action="{{ url_for('dashboard.stop_run', run_id=r['id']) }}"
+                onsubmit="return confirm('Stop this run? The dashboard will mark it failed right away; if the platform session is still mid-turn it will simply finish or idle out on its own.');">
+            <button type="submit" class="btn btn-danger">Stop</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('dashboard.delete_run', run_id=r['id']) }}"
+                onsubmit="return confirm('Delete this run from history?');">
+            <button type="submit" class="btn">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr class="empty-row"><td colspan="9">
+        <div class="empty-state">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 8v4l2.5 2.5"/><circle cx="12" cy="12" r="9"/></svg>
+          <strong>No runs yet</strong>
+          <span>Hit "Run now" on a project above to kick off the first delivery.</span>
+        </div>
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="section-head-text">
+      <p class="eyebrow">Housekeeping</p>
+      <h2>Danger zone</h2>
+      <p class="muted">Everything this app has created on the Managed Agents platform - agents, the shared environment, memory stores, and every session from every run above. Use this when you're done experimenting and want to stop it from costing anything further.</p>
+    </div>
+  </div>
+
+  <div class="danger-zone-card">
+    <div class="teardown-summary">
+      <span class="pill {{ 'pill-ok' if agent_ids.get(coordinator.cache_key) else 'pill-pending' }}">{{ coordinator.display_name }}{{ ' (created)' if agent_ids.get(coordinator.cache_key) else ' (not created)' }}</span>
+      {% for agent in specialists %}
+      <span class="pill {{ 'pill-ok' if agent_ids.get(agent.cache_key) else 'pill-pending' }}">{{ agent.display_name }}{{ ' (created)' if agent_ids.get(agent.cache_key) else ' (not created)' }}</span>
+      {% endfor %}
+      <span class="pill {{ 'pill-ok' if agent_ids.get('environment_id') else 'pill-pending' }}">environment{{ ' (created)' if agent_ids.get('environment_id') else ' (not created)' }}</span>
+      <span class="pill {{ 'pill-ok' if agent_ids.get('org_standards_id') else 'pill-pending' }}">org-standards memory{{ ' (created)' if agent_ids.get('org_standards_id') else ' (not created)' }}</span>
+      <span class="pill {{ 'pill-ok' if session_count else 'pill-pending' }}">{{ session_count }} session{{ 's' if session_count != 1 else '' }}</span>
+    </div>
+
+    <button type="button" id="open-teardown-modal" class="btn btn-danger">Delete platform resources&hellip;</button>
+  </div>
+</section>
+
+<div id="teardown-modal" class="modal-overlay" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="teardown-modal-title">
+    <div class="modal-head">
+      <h3 id="teardown-modal-title">Delete platform resources?</h3>
+      <button type="button" class="modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>This will, best-effort, remove everything this app created on Managed Agents:</p>
+      <ul>
+        <li><strong>{{ session_count }}</strong> session{{ 's' if session_count != 1 else '' }} - deleted permanently, including anything they produced that wasn't already downloaded.</li>
+        <li>The shared <strong>environment</strong> - deleted.</li>
+        <li>The <strong>org-standards</strong> memory store and every per-project memory store - deleted.</li>
+        <li><strong>{{ coordinator.display_name }}</strong>{% for agent in specialists %}, <strong>{{ agent.display_name }}</strong>{% endfor %} - Managed Agents has no agent delete, only <strong>archive</strong>. This is permanent and read-only forever; there is no unarchive.</li>
+      </ul>
+      <p>A currently running run must be stopped first - this refuses to run while one is in progress.</p>
+      <form method="post" action="{{ url_for('dashboard.teardown') }}">
+        <label class="teardown-vault-option">
+          <input type="checkbox" name="include_vaults">
+          <span>Also delete the Google Docs / Slack vaults. <strong>These are not created by this app</strong> - you connected them yourself in Console - and deleting them revokes their stored credentials. Reconnecting means redoing that Console setup, not just re-running this app.</span>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="cancel-teardown">Cancel</button>
+          <button type="submit" class="btn btn-danger">Yes, delete platform resources</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="brief-modal" class="modal-overlay" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="brief-modal-title">
+    <div class="modal-head">
+      <h3 id="brief-modal-title"></h3>
+      <button type="button" class="modal-close" aria-label="Close">&times;</button>
+    </div>
+    <pre id="brief-modal-text" class="modal-body"></pre>
+  </div>
+</div>
+
+<div id="brief-editor-modal" class="modal-overlay" hidden>
+  <div class="modal-box modal-box-lg" role="dialog" aria-modal="true" aria-labelledby="brief-editor-title">
+    <div class="modal-head">
+      <h3 id="brief-editor-title">Project brief</h3>
+      <button type="button" class="modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <textarea id="brief-editor-textarea" class="brief-editor-textarea" placeholder="I want a website for my boutique coffee roasting business... (up to 10,000 words)"></textarea>
+    </div>
+    <div class="modal-foot">
+      <span class="word-count" id="brief-word-count">0 / 10,000 words</span>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="brief-editor-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="brief-editor-save">Save brief</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Brief popup: each row's full brief lives in a hidden <template>, so no
+// escaping headaches with long/quote-heavy text in an HTML attribute. Click
+// the truncated preview button to populate and show the shared modal.
+(function () {
+  const modal = document.getElementById('brief-modal');
+  const titleEl = document.getElementById('brief-modal-title');
+  const textEl = document.getElementById('brief-modal-text');
+
+  function openBriefModal(projectName, briefText) {
+    titleEl.textContent = projectName;
+    textEl.textContent = briefText;
+    modal.hidden = false;
+  }
+  function closeBriefModal() {
+    modal.hidden = true;
+  }
+
+  document.querySelectorAll('.brief-preview').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tpl = document.getElementById(btn.dataset.briefId);
+      const fullBrief = tpl ? tpl.content.textContent : btn.textContent;
+      openBriefModal(btn.dataset.projectName, fullBrief);
+    });
+  });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal || e.target.classList.contains('modal-close')) closeBriefModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) closeBriefModal();
+  });
+})();
+
+// New-project brief editor: the textarea a user actually types into lives
+// in a popup (up to 10,000 words), not inline in the form - the visible
+// form only shows a one-line preview plus a "Write brief..." button. The
+// real form field is a hidden <textarea>, kept in sync on Save so it's
+// still what actually gets POSTed.
+(function () {
+  const openBtn = document.getElementById('open-brief-editor');
+  const modal = document.getElementById('brief-editor-modal');
+  if (!openBtn || !modal) return;
+
+  const cancelBtn = document.getElementById('brief-editor-cancel');
+  const saveBtn = document.getElementById('brief-editor-save');
+  const editorTextarea = document.getElementById('brief-editor-textarea');
+  const wordCountEl = document.getElementById('brief-word-count');
+  const valueField = document.getElementById('brief-field-value');
+  const previewEl = document.getElementById('brief-field-preview');
+  const errorEl = document.getElementById('brief-field-error');
+  const WORD_LIMIT = 10000;
+
+  function countWords(text) {
+    const trimmed = text.trim();
+    return trimmed ? trimmed.split(/\s+/).length : 0;
+  }
+
+  function updateWordCount() {
+    const words = countWords(editorTextarea.value);
+    const over = words > WORD_LIMIT;
+    wordCountEl.textContent = words.toLocaleString() + ' / ' + WORD_LIMIT.toLocaleString() + ' words'
+      + (over ? ' - over the limit by ' + (words - WORD_LIMIT).toLocaleString() : '');
+    wordCountEl.classList.toggle('is-over-limit', over);
+    saveBtn.disabled = over;
+  }
+
+  function updatePreview() {
+    const trimmed = valueField.value.trim();
+    if (!trimmed) {
+      previewEl.textContent = 'No brief written yet.';
+      previewEl.classList.add('is-empty');
+      return;
+    }
+    previewEl.textContent = trimmed.length > 140 ? trimmed.slice(0, 140) + '…' : trimmed;
+    previewEl.classList.remove('is-empty');
+  }
+
+  function open() {
+    editorTextarea.value = valueField.value;
+    updateWordCount();
+    modal.hidden = false;
+    editorTextarea.focus();
+  }
+
+  function close() { modal.hidden = true; }
+
+  function requestClose() {
+    if (editorTextarea.value !== valueField.value && !confirm('Discard changes to this brief?')) return;
+    close();
+  }
+
+  function save() {
+    if (countWords(editorTextarea.value) > WORD_LIMIT) return;
+    valueField.value = editorTextarea.value;
+    updatePreview();
+    errorEl.hidden = true;
+    close();
+  }
+
+  openBtn.addEventListener('click', open);
+  cancelBtn.addEventListener('click', requestClose);
+  saveBtn.addEventListener('click', save);
+  editorTextarea.addEventListener('input', updateWordCount);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal || e.target.classList.contains('modal-close')) requestClose();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) requestClose();
+  });
+
+  // Custom required check: the real field is a hidden <textarea>, which
+  // browsers exempt from native constraint validation, so an empty brief
+  // has to be caught by hand on submit - and pop the editor back open
+  // rather than just refusing silently.
+  const form = document.getElementById('new-project-form');
+  form.addEventListener('submit', (e) => {
+    if (!valueField.value.trim()) {
+      e.preventDefault();
+      errorEl.hidden = false;
+      open();
+    }
+  });
+
+  // Cancel: collapse the "+ New project" section and clear everything back
+  // to its starting state, so reopening it later never shows stale input.
+  const cancelProjectBtn = document.getElementById('cancel-new-project');
+  const detailsEl = form.closest('details.new-project');
+  cancelProjectBtn.addEventListener('click', () => {
+    form.reset();
+    updatePreview();
+    errorEl.hidden = true;
+    if (detailsEl) detailsEl.open = false;
+  });
+})();
+
+// Teardown confirmation popup - a real modal, not a browser confirm(), so
+// the exact list of what's about to be deleted/archived is visible before
+// the user commits to it.
+(function () {
+  const openBtn = document.getElementById('open-teardown-modal');
+  const modal = document.getElementById('teardown-modal');
+  if (!openBtn || !modal) return;
+  const cancelBtn = document.getElementById('cancel-teardown');
+
+  function open() { modal.hidden = false; }
+  function close() { modal.hidden = true; }
+
+  openBtn.addEventListener('click', open);
+  cancelBtn.addEventListener('click', close);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal || e.target.classList.contains('modal-close')) close();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) close();
+  });
+})();
+
+// Poll run status every 4s so "running" rows update to "success"/"failed"
+// without a full page reload. Simple fetch + DOM patch, no framework.
+async function pollRuns() {
+  try {
+    const res = await fetch("{{ url_for('dashboard.api_runs') }}");
+    const runs = await res.json();
+    for (const r of runs) {
+      const row = document.querySelector(`tr[data-run-id="${r.id}"]`);
+      if (!row) continue;
+
+      const statusCell = row.querySelector('.run-status');
+      if (statusCell && statusCell.textContent.trim() !== r.status) {
+        statusCell.textContent = r.status;
+        statusCell.className = 'run-status status-' + r.status;
+        // A run just finished (running -> success/failed) - refresh the
+        // whole page once so satisfied/cost/files/error all catch up,
+        // instead of hand-patching five more cells here.
+        if (r.status !== 'running') {
+          setTimeout(() => window.location.reload(), 600);
+        }
+      }
+    }
+  } catch (e) {
+    // Silent - the next poll will retry.
+  }
+}
+setInterval(pollRuns, 4000);
+
+// Live cost estimate every 30s, only for rows currently "running" - a
+// separate, slower interval since it costs a real platform API call
+// (session retrieve) per row, unlike the cheap local-DB status poll above.
+async function pollLiveCost() {
+  const runningRows = document.querySelectorAll('tr[data-run-id] .run-status.status-running');
+  for (const statusCell of runningRows) {
+    const row = statusCell.closest('tr[data-run-id]');
+    const runId = row.dataset.runId;
+    const costCell = row.querySelector('.run-cost');
+    if (!costCell) continue;
+    try {
+      const res = await fetch(`/api/runs/${runId}/cost`);
+      const data = await res.json();
+      if (data.cost_usd !== null && data.cost_usd !== undefined) {
+        costCell.textContent = '$' + data.cost_usd.toFixed(4) + ' (live)';
+      }
+    } catch (e) {
+      // Silent - the next 30s poll will retry.
+    }
+  }
+}
+setInterval(pollLiveCost, 30000);
+pollLiveCost();
+</script>
+
+{% endblock %}

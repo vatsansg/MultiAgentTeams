@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+data/*.sqlite3
+data/*.sqlite3-journal
+data/agent_cache.json
+outputs/
+tests/_smoke_tmp/
+.env
+venv/
+.vscode/
+.claude/

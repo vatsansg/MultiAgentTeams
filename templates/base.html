@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15162c">
+  <meta name="description" content="Agent Console - run and schedule your BRD + Technical Design Document delivery agents.">
+  <title>{% block title %}Agent Console{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2315162c'/%3E%3Ccircle cx='16' cy='9' r='3.4' fill='%23fff'/%3E%3Ccircle cx='7' cy='24' r='2.8' fill='%23a5a2ff'/%3E%3Ccircle cx='16' cy='24' r='2.8' fill='%23a5a2ff'/%3E%3Ccircle cx='25' cy='24' r='2.8' fill='%23a5a2ff'/%3E%3Cpath d='M16 12.4V19M16 19L7 21.4M16 19v2.6M16 19l9 2.4' stroke='rgba(255,255,255,0.45)' stroke-width='1.4' fill='none'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="{{ url_for('dashboard.index') if session.get('logged_in') else '#' }}" class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <circle class="node-root" cx="16" cy="9" r="3.4"/>
+          <circle class="node-leaf" cx="7" cy="24" r="2.8"/>
+          <circle class="node-leaf" cx="16" cy="24" r="2.8"/>
+          <circle class="node-leaf" cx="25" cy="24" r="2.8"/>
+          <path d="M16 12.4V19M16 19L7 21.4M16 19v2.6M16 19l9 2.4" stroke-width="1.4"/>
+        </svg>
+        Agent Console
+      </a>
+      {% if session.get('logged_in') %}
+      <nav>
+        <span class="user-chip">
+          <span class="user-avatar">{{ session.get('username', '?')[0]|upper }}</span>
+          {{ session.get('username') }}
+        </span>
+        <a class="logout-link" href="{{ url_for('auth.logout') }}">Log out</a>
+      </nav>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}" role="status">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    // Global submit-loading state: any form that actually submits (i.e. wasn't
+    // blocked by an onsubmit confirm() returning false) gets its submit button
+    // disabled and swapped to a "Working..." label, so slow requests (agent
+    // creation, teardown, run triggers) always give visible feedback instead
+    // of looking like a dead click.
+    document.addEventListener('submit', function (e) {
+      if (e.defaultPrevented) return;
+      var btn = e.target.querySelector('button[type="submit"]');
+      if (!btn || btn.disabled) return;
+      btn.dataset.originalText = btn.textContent;
+      btn.textContent = 'Working…';
+      btn.disabled = true;
+      btn.classList.add('is-loading');
+    });
+  </script>
+</body>
+</html>

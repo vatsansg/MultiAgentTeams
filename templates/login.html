@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Log in - Agent Console{% endblock %}
+{% block content %}
+<div class="login-shell">
+  <div class="login-brand-panel">
+    <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <circle class="node-root" cx="16" cy="9" r="3.4" fill="#fff"/>
+      <circle class="node-leaf" cx="7" cy="24" r="2.8" fill="#a5a2ff"/>
+      <circle class="node-leaf" cx="16" cy="24" r="2.8" fill="#a5a2ff"/>
+      <circle class="node-leaf" cx="25" cy="24" r="2.8" fill="#a5a2ff"/>
+      <path d="M16 12.4V19M16 19L7 21.4M16 19v2.6M16 19l9 2.4" stroke="rgba(255,255,255,0.45)" stroke-width="1.4"/>
+    </svg>
+    <h1>One brief in, a full delivery team out.</h1>
+    <p>Agent Console coordinates a Delivery Lead and its specialists to turn a project brief into a BRD and Technical Design Document - on demand or on a schedule.</p>
+    <ul class="login-brand-list">
+      <li><span class="dot"></span> One coordinator delegates to every specialist automatically</li>
+      <li><span class="dot"></span> Run on demand or set a cron / interval schedule</li>
+      <li><span class="dot"></span> Track cost, status, and output files per run</li>
+    </ul>
+  </div>
+  <div class="login-form-panel">
+    <form class="login-card" method="post">
+      <h1>Welcome back</h1>
+      <p class="muted">Sign in to view and run your agents.</p>
+      <label>Username
+        <input type="text" name="username" autofocus required autocomplete="username">
+      </label>
+      <label>Password
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <button type="submit" class="btn btn-primary">Log in</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
