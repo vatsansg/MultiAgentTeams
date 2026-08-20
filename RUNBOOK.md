@@ -256,24 +256,26 @@ Open `http://localhost:5000` in a browser. Enter the `CONSOLE_USERNAME` /
 
 **Outcome:** you land on the dashboard. On first startup the app seeds a
 default agent catalog (Delivery Lead, Roger the Business Analyst, Michael
-the Solution Architect, Smith the Developer) - but there are no teams yet,
-so you'll see a prompt to create one before an org chart or project can
-exist. See Step 7b below, and README.md's "Teams and the agent catalog"
-section for the full model.
+the Solution Architect, Smith the Developer, Jack the local QA Tester,
+Donald the cloud QA Tester) - but there are no teams yet, so you'll see a
+prompt to create one before an org chart or project can exist. See Step
+7b below, and README.md's "Teams and the agent catalog" section for the
+full model.
 
 ---
 
 ## Step 7b - Create your first team
 
 Sidebar → **Teams** → **+ Create team**. Give it a name (e.g. `Website
-Delivery Team`) and an optional description, then **Create team**. This
-snapshots the current agent catalog (Delivery Lead, Roger, Michael, Smith)
-into the new team - there's no picking a subset in this pass, every team
-gets the full catalog.
+Delivery Team`) and an optional description. Below that, check which
+roles to include - Delivery Lead is always included as coordinator; leave
+every specialist checked (Roger, Michael, Smith, Jack, Donald) for a
+full-pipeline team, or uncheck any you don't want yet - you can add/remove
+roles later from the team's **Edit** page. Click **Create team**.
 
 **Outcome:** back on the dashboard, the new team appears in the Team
 selector at the top and its org chart renders below - Delivery Lead
-(coordinator) on top, Roger/Michael/Smith as specialists on the level
+(coordinator) on top, whichever specialists you checked on the level
 below. Each agent card shows "not created yet" - that's expected until
 Step 9's first real run.
 
@@ -309,9 +311,10 @@ creates a `runs` row, and starts `pipeline.run_delivery_pipeline` in a
 background thread. The first run for a fresh team also creates that
 team's agents and the shared `org-standards` memory store (cached to
 `data/agent_cache.json`, keyed per team, so later runs reuse them instead
-of recreating them). If the team includes Smith (Developer), this first
-run also broadens the shared sandbox environment's network access in
-place (package manager registries + GitHub) - a one-time, automatic step.
+of recreating them). If the team includes Smith (Developer) or either QA
+role (Jack, Donald), this first run also broadens the shared sandbox
+environment's network access in place (package manager registries +
+GitHub) - a one-time, automatic step.
 
 **Outcome:** the Run history table's new row shows `running`, then
 updates automatically (polled every 4 seconds) to `success` or `failed`.
@@ -329,9 +332,13 @@ Once a run shows `success`:
 
 1. **Local files** - check `outputs/<project-slug>/BRD.md` and
    `outputs/<project-slug>/Technical_Design_Document.md` (if the team
-   includes Roger/Michael), and `outputs/<project-slug>/site.zip` (if the
+   includes Roger/Michael), `outputs/<project-slug>/site.zip` (if the
    team includes Smith - the run history row's Files column also gets a
-   "Site (.zip)" link).
+   "Site (.zip)" link), and `outputs/<project-slug>/qa-artifacts.zip` (if
+   the team includes Jack and/or Donald - a "QA (.zip)" link appears
+   too). Unzip it: it contains `test-plan.md`, `test-cases.md`,
+   `qa-report-local.md` (Jack), and `qa-report-cloud.md` (Donald, if he
+   ran).
 2. **Google Docs** - a "Delivery" folder should contain new documents
    titled after your project, for whichever of the BRD/TDD were produced.
 3. **Slack** - your configured channel should have one or two short
@@ -424,13 +431,20 @@ source code.
   first for a quick sanity check). This is per-team-snapshot, not global:
   it only affects **teams created after the change**. A team created
   before the edit keeps using its already-provisioned agent's original
-  prompt until you delete that team and recreate it (or clear the
-  matching `cache_key` from `data/agent_cache.json` to force that one
-  agent to be recreated on the next run).
+  prompt - either delete and recreate that team, or clear the matching
+  `cache_key` from `data/agent_cache.json` to force just that one agent
+  to be recreated on the next run.
+- **Add or remove a role on an existing team:** Teams → the team's
+  **Edit** page → check/uncheck roles → **Save**. If membership actually
+  changed, the team's coordinator's cached agent id is cleared
+  automatically, so it's recreated (with the updated delegation steps and
+  roster) the next time that team runs - you don't need to touch
+  `agent_cache.json` by hand for this specific case.
 - **Change what counts as "done":** the rubric is now assembled per-team
   from `RUBRIC_BRD_SECTION` / `RUBRIC_TDD_SECTION` / `RUBRIC_SITE_SECTION`
-  in `../labs/shared/prompts.py` (`pipeline._build_rubric`), included only
-  for the roles actually on the team. Edit those constants for org-wide
+  / `RUBRIC_QA_SECTION` in `../labs/shared/prompts.py`
+  (`pipeline._build_rubric`), included only for the roles actually on the
+  team. Edit those constants for org-wide
   rubric changes.
 - **Use a cheaper/faster model:** set `MODEL=claude-haiku-4-5-20251001` in
   `.env` and restart the app. This only affects agents created *after*

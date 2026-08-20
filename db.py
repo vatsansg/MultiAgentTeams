@@ -11,6 +11,7 @@ from `init_db()`. New tables just go in `SCHEMA` as `CREATE TABLE IF NOT
 EXISTS`.
 """
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -123,7 +124,8 @@ def init_db():
         _add_column_if_missing(conn, "projects", "schedule_summary", "TEXT")
         _add_column_if_missing(conn, "runs", "team_name", "TEXT")
         _add_column_if_missing(conn, "runs", "site_path", "TEXT")
-    _seed_agent_specs_if_empty()
+        _add_column_if_missing(conn, "runs", "qa_artifacts_path", "TEXT")
+    _seed_default_agent_specs()
 
 
 # --- agent_specs ---------------------------------------------------------
@@ -169,14 +171,21 @@ def update_agent_spec(spec_id: int, *, display_name, role_title, description,
         )
 
 
-def _seed_agent_specs_if_empty():
+def _seed_default_agent_specs():
+    """Inserts any DEFAULT_AGENT_SPECS role not already present, by
+    role_key - idempotent, and runs on every startup (not just when the
+    table is empty). This means adding a new role to
+    agent_specs_seed.py's DEFAULT_AGENT_SPECS automatically backfills it
+    into an existing database the next time the app starts - no manual
+    DB wipe needed. An existing role's row is never touched here (editing
+    it is the Agent Specs UI's job)."""
     with get_conn() as conn:
-        count = conn.execute("SELECT COUNT(*) AS c FROM agent_specs").fetchone()["c"]
-        if count:
-            return
+        existing_keys = {r["role_key"] for r in conn.execute("SELECT role_key FROM agent_specs")}
         from agent_specs_seed import DEFAULT_AGENT_SPECS
         now = now_iso()
         for spec in DEFAULT_AGENT_SPECS:
+            if spec["role_key"] in existing_keys:
+                continue
             conn.execute(
                 "INSERT INTO agent_specs (role_key, display_name, role_title, description, "
                 "system_prompt, handoff_instructions, skills, tools_label, is_coordinator, "
@@ -190,26 +199,81 @@ def _seed_agent_specs_if_empty():
 # --- teams -----------------------------------------------------------------
 
 
-def _insert_team_member(conn, team_id: int, spec) -> None:
+class DuplicateTeamMemberNameError(Exception):
+    """Raised by create_team/update_team_members when two members of the
+    same team would end up sharing a display name (case-insensitive,
+    trimmed). Team member names only need to be unique WITHIN a team -
+    the same name is fine on two different teams, and doesn't need to
+    match the catalog's own display_name either."""
+
+
+def _validate_unique_names(name_by_spec_id: dict):
+    seen = {}
+    for spec_id, name in name_by_spec_id.items():
+        key = name.strip().lower()
+        if key in seen:
+            raise DuplicateTeamMemberNameError(
+                f'Two team members can\'t both be named "{name.strip()}" - names must be '
+                "unique within a team."
+            )
+        seen[key] = spec_id
+
+
+def _apply_name_renames(text, rename_map: dict):
+    """Text-substitutes every occurrence of an old (catalog-original)
+    agent name with its team-specific rename, in a role's own
+    system_prompt/handoff_instructions - both self-references ("You are
+    Smith...") and cross-references (Donald's own prompt says "Jack's
+    artifacts"). Word-boundary matched so e.g. renaming "Jack" doesn't
+    also mangle an unrelated word containing "jack" as a substring. Uses
+    a replacement function (not a replacement string) so a new name
+    containing characters like backslashes can't be misinterpreted as a
+    regex backreference."""
+    if not text:
+        return text
+    for old, new in rename_map.items():
+        if old == new:
+            continue
+        text = re.sub(rf"\b{re.escape(old)}\b", lambda m, _new=new: _new, text)
+    return text
+
+
+def _insert_team_member(conn, team_id: int, spec, *, display_name=None,
+                         system_prompt=None, handoff_instructions=None) -> None:
+    display_name = spec["display_name"] if display_name is None else display_name
+    system_prompt = spec["system_prompt"] if system_prompt is None else system_prompt
+    handoff_instructions = (
+        spec["handoff_instructions"] if handoff_instructions is None else handoff_instructions
+    )
     cache_key = f"team{team_id}_{spec['role_key']}"
     conn.execute(
         "INSERT INTO team_members (team_id, agent_spec_id, role_key, display_name, "
         "role_title, description, system_prompt, handoff_instructions, skills, "
         "tools_label, is_coordinator, sequence, cache_key, created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (team_id, spec["id"], spec["role_key"], spec["display_name"], spec["role_title"],
-         spec["description"], spec["system_prompt"], spec["handoff_instructions"],
+        (team_id, spec["id"], spec["role_key"], display_name, spec["role_title"],
+         spec["description"], system_prompt, handoff_instructions,
          spec["skills"], spec["tools_label"], spec["is_coordinator"], spec["sequence"],
          cache_key, now_iso()),
     )
 
 
-def create_team(name: str, description: str, spec_ids: list = None) -> int:
+def create_team(name: str, description: str, spec_ids: list = None, custom_names: dict = None) -> int:
     """Creates the team, then snapshots the chosen agent_specs rows into
     team_members in the same transaction. The coordinator role is always
     included regardless of spec_ids (there's no UI to opt it out).
     spec_ids=None (the default) includes every current catalog role -
-    kept for backward compatibility with callers that want "everything"."""
+    kept for backward compatibility with callers that want "everything".
+
+    custom_names: optional {agent_spec_id: display_name} overrides,
+    validated unique within the team (case-insensitive, trimmed) before
+    anything is inserted. Every included member's system_prompt/
+    handoff_instructions gets any renamed member's original catalog name
+    text-substituted for its new name (self- and cross-references both -
+    see _apply_name_renames), so a renamed agent's own prompt, and any
+    other agent's prompt that mentions it by name, both stay consistent.
+    """
+    custom_names = custom_names or {}
     with get_conn() as conn:
         try:
             cur = conn.execute(
@@ -221,9 +285,23 @@ def create_team(name: str, description: str, spec_ids: list = None) -> int:
         team_id = cur.lastrowid
         specs = conn.execute("SELECT * FROM agent_specs ORDER BY sequence ASC, id ASC").fetchall()
         chosen_ids = set(spec_ids) if spec_ids is not None else {s["id"] for s in specs}
-        for spec in specs:
-            if spec["id"] in chosen_ids or spec["is_coordinator"]:
-                _insert_team_member(conn, team_id, spec)
+        included = [s for s in specs if s["id"] in chosen_ids or s["is_coordinator"]]
+
+        final_names = {}
+        for spec in included:
+            override = custom_names.get(spec["id"])
+            final_names[spec["id"]] = override.strip() if override and override.strip() else spec["display_name"]
+        _validate_unique_names(final_names)
+
+        rename_map = {s["display_name"]: final_names[s["id"]] for s in included}
+
+        for spec in included:
+            _insert_team_member(
+                conn, team_id, spec,
+                display_name=final_names[spec["id"]],
+                system_prompt=_apply_name_renames(spec["system_prompt"], rename_map),
+                handoff_instructions=_apply_name_renames(spec["handoff_instructions"], rename_map),
+            )
         return team_id
 
 
@@ -238,47 +316,99 @@ def rename_team(team_id: int, name: str, description: str):
             raise DuplicateNameError(str(exc)) from exc
 
 
-def update_team_members(team_id: int, spec_ids: list) -> bool:
-    """Reconciles an existing team's membership with the given agent_spec
-    ids - adds specs newly checked, removes specialists newly unchecked.
-    The coordinator role is never removable and isn't affected by
-    spec_ids either way. Returns True if anything actually changed, so
-    the caller knows whether the team's coordinator needs to be recreated
-    on the platform (its multiagent roster and dynamic system prompt are
-    both built from the specialist list at agent-creation time - adding a
-    specialist here doesn't retroactively update an already-provisioned
-    coordinator, only invalidating its cached agent id and letting the
-    next run recreate it does)."""
+def update_team_members(team_id: int, spec_ids: list, custom_names: dict = None) -> str:
+    """Reconciles an existing team's membership AND per-team display
+    names with the given selection. custom_names: optional
+    {agent_spec_id: display_name} overrides for any kept role (including
+    the coordinator's own spec id, if you want to rename it too - the
+    coordinator's membership itself is never toggled by spec_ids).
+
+    Returns one of:
+      "none"        - nothing changed.
+      "coordinator" - membership changed (a role was added/removed) but
+                       no name changed. Only the coordinator's cached
+                       platform agent needs recreating (its multiagent
+                       roster/delegation steps are stale), everyone
+                       else's is still accurate.
+      "all"         - at least one member was renamed this edit. A
+                       rename can appear in ANY other included member's
+                       prompt text as a cross-reference (not just its own
+                       self-reference), so every agent on the team must
+                       be recreated to guarantee nothing stale survives -
+                       cheaper to over-invalidate here than to under-
+                       invalidate and ship a stale name reference.
+    """
+    custom_names = custom_names or {}
     spec_ids = set(spec_ids)
-    changed = False
     with get_conn() as conn:
         current = conn.execute(
             "SELECT * FROM team_members WHERE team_id = ?", (team_id,)
         ).fetchall()
-        current_spec_ids = {m["agent_spec_id"] for m in current if not m["is_coordinator"]}
+        current_by_spec_id = {m["agent_spec_id"]: m for m in current if m["agent_spec_id"] is not None}
+        coordinator_row = next(m for m in current if m["is_coordinator"])
+        all_specs = {s["id"]: s for s in conn.execute("SELECT * FROM agent_specs").fetchall()}
 
+        keep_ids = set(spec_ids)
+        if coordinator_row["agent_spec_id"] is not None:
+            keep_ids.add(coordinator_row["agent_spec_id"])
+        keep_ids &= all_specs.keys()
+
+        final_names = {}
+        for spec_id in keep_ids:
+            override = custom_names.get(spec_id)
+            if override and override.strip():
+                final_names[spec_id] = override.strip()
+            elif spec_id in current_by_spec_id:
+                final_names[spec_id] = current_by_spec_id[spec_id]["display_name"]
+            else:
+                final_names[spec_id] = all_specs[spec_id]["display_name"]
+        _validate_unique_names(final_names)
+
+        renamed = any(
+            spec_id in current_by_spec_id
+            and current_by_spec_id[spec_id]["display_name"] != final_names[spec_id]
+            for spec_id in keep_ids
+        )
+
+        membership_changed = False
         for member in current:
-            if not member["is_coordinator"] and member["agent_spec_id"] not in spec_ids:
+            if not member["is_coordinator"] and member["agent_spec_id"] not in keep_ids:
                 conn.execute("DELETE FROM team_members WHERE id = ?", (member["id"],))
-                changed = True
+                membership_changed = True
 
-        to_add = spec_ids - current_spec_ids
-        if to_add:
-            specs_by_id = {
-                s["id"]: s for s in conn.execute(
-                    "SELECT * FROM agent_specs WHERE id IN ({})".format(
-                        ",".join("?" * len(to_add))
-                    ), tuple(to_add),
-                ).fetchall()
-            }
-            for spec_id in to_add:
-                spec = specs_by_id.get(spec_id)
-                if spec is None or spec["is_coordinator"]:
-                    continue  # coordinator membership isn't toggleable here
-                _insert_team_member(conn, team_id, spec)
-                changed = True
+        # Full catalog-name -> final-name map, covering every kept member
+        # - always derived from the pristine agent_specs text (never from
+        # a possibly-already-rewritten team_members row), so cumulative
+        # renames across multiple edits never drift or silently get
+        # dropped once a later edit stops touching that particular name.
+        full_rename_map = {all_specs[sid]["display_name"]: final_names[sid] for sid in keep_ids}
 
-    return changed
+        for spec_id in keep_ids:
+            spec = all_specs[spec_id]
+            display_name = final_names[spec_id]
+            if spec_id in current_by_spec_id:
+                if renamed:
+                    system_prompt = _apply_name_renames(spec["system_prompt"], full_rename_map)
+                    handoff = _apply_name_renames(spec["handoff_instructions"], full_rename_map)
+                    conn.execute(
+                        "UPDATE team_members SET display_name = ?, system_prompt = ?, "
+                        "handoff_instructions = ? WHERE id = ?",
+                        (display_name, system_prompt, handoff, current_by_spec_id[spec_id]["id"]),
+                    )
+            elif not spec["is_coordinator"]:
+                _insert_team_member(
+                    conn, team_id, spec,
+                    display_name=display_name,
+                    system_prompt=_apply_name_renames(spec["system_prompt"], full_rename_map),
+                    handoff_instructions=_apply_name_renames(spec["handoff_instructions"], full_rename_map),
+                )
+                membership_changed = True
+
+    if renamed:
+        return "all"
+    if membership_changed:
+        return "coordinator"
+    return "none"
 
 
 def get_team_coordinator_cache_key(team_id: int):
@@ -434,13 +564,13 @@ def create_run(project_id: int, trigger_type: str, team_name: str = None) -> int
 
 
 def finish_run(run_id: int, *, status: str, satisfied=None, session_id=None,
-                brd_path=None, tdd_path=None, site_path=None, google_doc_links=None,
-                cost_usd=None, error=None):
+                brd_path=None, tdd_path=None, site_path=None, qa_artifacts_path=None,
+                google_doc_links=None, cost_usd=None, error=None):
     with get_conn() as conn:
         conn.execute(
             "UPDATE runs SET status = ?, satisfied = ?, session_id = ?, brd_path = ?, "
-            "tdd_path = ?, site_path = ?, google_doc_links = ?, cost_usd = ?, error = ?, "
-            "finished_at = ? WHERE id = ?",
+            "tdd_path = ?, site_path = ?, qa_artifacts_path = ?, google_doc_links = ?, "
+            "cost_usd = ?, error = ?, finished_at = ? WHERE id = ?",
             (
                 status,
                 None if satisfied is None else int(satisfied),
@@ -448,6 +578,7 @@ def finish_run(run_id: int, *, status: str, satisfied=None, session_id=None,
                 brd_path,
                 tdd_path,
                 site_path,
+                qa_artifacts_path,
                 google_doc_links,
                 cost_usd,
                 error,

@@ -42,6 +42,7 @@ from prompts import (  # noqa: E402  (import after sys.path insert, matches note
     RUBRIC_BRD_SECTION,
     RUBRIC_TDD_SECTION,
     RUBRIC_SITE_SECTION,
+    RUBRIC_QA_SECTION,
 )
 from cost_meter import estimate_session_cost  # noqa: E402
 
@@ -57,6 +58,7 @@ class PipelineResult:
     brd_path: Optional[str] = None
     tdd_path: Optional[str] = None
     site_path: Optional[str] = None
+    qa_artifacts_path: Optional[str] = None
     google_doc_links: list = field(default_factory=list)
     cost_usd: Optional[float] = None
     events_log: list = field(default_factory=list)
@@ -178,16 +180,19 @@ _SCOPED_WRITE_READ = [{
     ],
 }]
 
-# The Developer (Smith) needs the full, unscoped toolset (including bash)
-# to install dependencies, run a local dev/build command, and zip the
-# finished site - unlike the BA/Architect, who only ever write/read
-# markdown.
+# The Developer (Smith) and both QA roles (Jack, Donald) need the full,
+# unscoped toolset (including bash) - Smith to install dependencies, run
+# a local dev/build command, and zip the finished site; Jack/Donald to
+# install and start that site and actually execute their test cases
+# against it - unlike the BA/Architect, who only ever write/read markdown.
 _DEV_TOOLSET = [{"type": "agent_toolset_20260401"}]
 
 _TOOLS_BY_ROLE = {
     "business_analyst": _SCOPED_WRITE_READ,
     "solution_architect": _SCOPED_WRITE_READ,
     "developer": _DEV_TOOLSET,
+    "qa_local": _DEV_TOOLSET,
+    "qa_cloud": _DEV_TOOLSET,
 }
 
 
@@ -215,6 +220,7 @@ def _build_closing_steps(specialists: list, start_index: int) -> str:
     role_keys = {m["role_key"] for m in specialists}
     has_docs = bool({"business_analyst", "solution_architect"} & role_keys)
     has_dev = "developer" in role_keys
+    has_qa = bool({"qa_local", "qa_cloud"} & role_keys)
 
     steps = []
     n = start_index
@@ -232,6 +238,13 @@ def _build_closing_steps(specialists: list, start_index: int) -> str:
         steps.append(
             f"{n}. Do not file the website itself to Google Docs and do not deploy it anywhere - "
             "/mnt/session/outputs/site.zip is the complete deliverable for the website."
+        )
+        n += 1
+    if has_qa:
+        steps.append(
+            f"{n}. Include the QA test plan, test cases, and QA report(s) "
+            "(/mnt/session/outputs/qa-artifacts.zip) among the delivered artifacts - this is a "
+            "required deliverable when QA is on the team, not an optional extra."
         )
         n += 1
     slack_tail = " and linking any filed Google Docs" if has_docs else ""
@@ -280,6 +293,8 @@ def _build_outcome_description(project_name: str, project_brief: str, team: dict
         deliverables.append("a BRD and a Technical Design Document, filed to Google Docs")
     if "developer" in role_keys:
         deliverables.append("a runnable website packaged as site.zip")
+    if {"qa_local", "qa_cloud"} & role_keys:
+        deliverables.append("a QA test plan, test cases, and QA report(s) packaged as qa-artifacts.zip")
     deliverables_text = " and ".join(deliverables) if deliverables else "the requested deliverables"
     return (
         f"Project: {project_name}. Brief: {project_brief} "
@@ -308,6 +323,8 @@ def _build_rubric(team: dict) -> str:
         parts.append(RUBRIC_TDD_SECTION)
     if "developer" in role_keys:
         parts.append(RUBRIC_SITE_SECTION)
+    if {"qa_local", "qa_cloud"} & role_keys:
+        parts.append(RUBRIC_QA_SECTION)
     parts.append(_build_delivery_rubric_section(role_keys))
     return "\n".join(parts)
 
@@ -756,6 +773,8 @@ def run_delivery_pipeline(
         wanted["Technical_Design_Document.md"] = project_dir / "Technical_Design_Document.md"
     if "developer" in role_keys:
         wanted["site.zip"] = project_dir / "site.zip"
+    if {"qa_local", "qa_cloud"} & role_keys:
+        wanted["qa-artifacts.zip"] = project_dir / "qa-artifacts.zip"
     saved = {}
     for f in client.beta.files.list(scope_id=session.id, betas=config.BETAS):
         if f.filename in wanted:
@@ -772,5 +791,6 @@ def run_delivery_pipeline(
         brd_path=saved.get("BRD.md"),
         tdd_path=saved.get("Technical_Design_Document.md"),
         site_path=saved.get("site.zip"),
+        qa_artifacts_path=saved.get("qa-artifacts.zip"),
         cost_usd=cost["total_cost"],
     )

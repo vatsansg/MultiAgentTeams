@@ -147,20 +147,26 @@ def main():
     assert b"Team" in resp.data
     print("PASS: login succeeds and dashboard renders")
 
-    # 4. The agent_specs catalog seeds exactly 4 roles on a fresh DB, one coordinator.
+    # 4. The agent_specs catalog seeds exactly 6 roles on a fresh DB, one coordinator.
     specs = db.list_agent_specs()
-    assert len(specs) == 4, f"expected 4 seeded agent specs, got {len(specs)}"
+    assert len(specs) == 6, f"expected 6 seeded agent specs, got {len(specs)}"
     role_keys = {s["role_key"] for s in specs}
-    assert role_keys == {"delivery_lead", "business_analyst", "solution_architect", "developer"}, role_keys
+    assert role_keys == {
+        "delivery_lead", "business_analyst", "solution_architect",
+        "developer", "qa_local", "qa_cloud",
+    }, role_keys
     coordinators = [s for s in specs if s["is_coordinator"]]
     assert len(coordinators) == 1 and coordinators[0]["role_key"] == "delivery_lead"
-    print("PASS: agent_specs catalog seeded with exactly 4 roles, one coordinator")
+    print("PASS: agent_specs catalog seeded with exactly 6 roles (incl. Jack/Donald), one coordinator")
 
-    # 5. /agents renders the catalog, including Smith's skills.
+    # 5. /agents renders the catalog, including Smith's, Jack's, and
+    # Donald's skills.
     resp = client.get("/agents")
     assert resp.status_code == 200
     assert b"Smith" in resp.data and b"Node.js" in resp.data
-    print("PASS: /agents renders the catalog with Smith's skills")
+    assert b"Jack" in resp.data and b"Local environment QA" in resp.data
+    assert b"Donald" in resp.data and b"Cloud environment QA" in resp.data
+    print("PASS: /agents renders the catalog with Smith's, Jack's, and Donald's skills")
 
     # 6. Creating a project without a team is rejected.
     resp = client.post(
@@ -178,12 +184,21 @@ def main():
     team2_id = db.create_team("Delivery Team Two", "Second team")
     bundle1 = db.get_team_with_members(team1_id)
     bundle2 = db.get_team_with_members(team2_id)
-    assert len(bundle1["members"]) == 4 and len(bundle2["members"]) == 4
+    assert len(bundle1["members"]) == 6 and len(bundle2["members"]) == 6
+    assert {"qa_local", "qa_cloud"} <= {m["role_key"] for m in bundle1["members"]}
     ba1 = [m for m in bundle1["members"] if m["role_key"] == "business_analyst"][0]
     ba2 = [m for m in bundle2["members"] if m["role_key"] == "business_analyst"][0]
     assert ba1["cache_key"] != ba2["cache_key"], "two teams' cache_keys must not collide"
     assert ba1["cache_key"] == f"team{team1_id}_business_analyst"
     print(f"PASS: team snapshot + cache_key collision-prevention ({ba1['cache_key']} vs {ba2['cache_key']})")
+
+    # 7a. The danger-zone teardown roster (db.list_all_team_members) is
+    # fully dynamic - Jack and Donald show up automatically once they're
+    # part of a team, with no teardown code changes needed for a new role.
+    all_members = db.list_all_team_members()
+    team1_labels = {m["display_name"] for m in all_members if m["team_name"] == "Delivery Team One"}
+    assert {"Jack", "Donald"} <= team1_labels, team1_labels
+    print("PASS: Jack and Donald appear in the teardown roster automatically once on a team")
 
     # 7b. Dynamic team composition: creating a team with only a subset of
     # roles selected (no Developer) excludes Smith; the coordinator is
@@ -243,6 +258,72 @@ def main():
 
     db.delete_team(partial_team_id)
 
+    # 7e. Per-team agent renaming: a custom name at creation time is
+    # applied to that member's own display_name AND text-substituted into
+    # every included member's system_prompt/handoff_instructions - both
+    # self-references (Jack's own prompt) and cross-references (Donald's
+    # own prompt mentions Jack by name).
+    all_spec_ids = [s["id"] for s in specs]
+    jack_spec = [s for s in specs if s["role_key"] == "qa_local"][0]
+    donald_spec = [s for s in specs if s["role_key"] == "qa_cloud"][0]
+    rename_team_id = db.create_team(
+        "Rename Test Team", "", all_spec_ids, custom_names={jack_spec["id"]: "Alice"},
+    )
+    rename_bundle = db.get_team_with_members(rename_team_id)
+    members_by_role = {m["role_key"]: m for m in rename_bundle["members"]}
+    assert members_by_role["qa_local"]["display_name"] == "Alice"
+    assert "Alice" in members_by_role["qa_cloud"]["system_prompt"]
+    assert "Jack" not in members_by_role["qa_cloud"]["system_prompt"]
+    print("PASS: create_team renames a member and rewrites cross-references in other members' prompts")
+
+    try:
+        db.create_team(
+            "Bad Rename Team", "", all_spec_ids,
+            custom_names={jack_spec["id"]: "Bob", donald_spec["id"]: "Bob"},
+        )
+        raise AssertionError("expected DuplicateTeamMemberNameError")
+    except db.DuplicateTeamMemberNameError:
+        pass
+    print("PASS: two members with the same name (case-insensitive) within a team is rejected")
+
+    # Edit: rename Alice -> Charlie. Scope must be "all" (a rename can
+    # touch any other member's prompt, not just the coordinator's), and
+    # invalidating must clear EVERY member's cache_key, including
+    # Donald's (whose prompt cross-references Jack/Alice/Charlie).
+    coordinator_cache_key = db.get_team_coordinator_cache_key(rename_team_id)
+    donald_cache_key = members_by_role["qa_cloud"]["cache_key"]
+    pipeline._save_cache({
+        coordinator_cache_key: "agent_FAKE_COORD_RENAME",
+        donald_cache_key: "agent_FAKE_DONALD_RENAME",
+    })
+    scope = db.update_team_members(rename_team_id, all_spec_ids, custom_names={jack_spec["id"]: "Charlie"})
+    assert scope == "all", scope
+    for member in db.list_team_members(rename_team_id):
+        pipeline.invalidate_cached_agent(member["cache_key"])
+    cache_after = pipeline._load_cache()
+    assert coordinator_cache_key not in cache_after
+    assert donald_cache_key not in cache_after
+    updated_bundle = db.get_team_with_members(rename_team_id)
+    updated_by_role = {m["role_key"]: m for m in updated_bundle["members"]}
+    assert updated_by_role["qa_local"]["display_name"] == "Charlie"
+    assert "Charlie" in updated_by_role["qa_cloud"]["system_prompt"]
+    assert "Alice" not in updated_by_role["qa_cloud"]["system_prompt"]
+    print("PASS: renaming a member on an existing team returns scope='all' and clears every cached agent")
+
+    # A later, unrelated edit (renaming Smith) must not lose the earlier
+    # Jack->Charlie rename inside Donald's prompt.
+    smith_spec = [s for s in specs if s["role_key"] == "developer"][0]
+    db.update_team_members(rename_team_id, all_spec_ids, custom_names={smith_spec["id"]: "Tony"})
+    final_bundle = db.get_team_with_members(rename_team_id)
+    final_by_role = {m["role_key"]: m for m in final_bundle["members"]}
+    assert final_by_role["developer"]["display_name"] == "Tony"
+    assert "Charlie" in final_by_role["qa_cloud"]["system_prompt"], (
+        "an unrelated later edit must not drop an earlier rename's cross-reference"
+    )
+    print("PASS: cumulative renames across multiple edits don't drift or get lost")
+
+    db.delete_team(rename_team_id)
+
     # 8. Create a project against team1.
     resp = client.post(
         "/projects",
@@ -260,14 +341,47 @@ def main():
     assert projects[0]["team_id"] == team1_id
     print(f"PASS: project created against team1 (id={project_id})")
 
+    # 8b. Renaming via the real /teams/new route (not just db.create_team
+    # directly): confirm the form's per-role name_for_<id> fields actually
+    # reach the database, and a duplicate name within the team is rejected
+    # with the team never created.
+    resp = client.get("/teams/new")
+    assert resp.status_code == 200
+    assert b"name_for_" in resp.data
+    route_specs = db.list_agent_specs()
+    route_jack = [s for s in route_specs if s["role_key"] == "qa_local"][0]
+    form_data = {"name": "Route Rename Team", "description": ""}
+    form_data["spec_ids"] = [str(s["id"]) for s in route_specs if not s["is_coordinator"]]
+    for s in route_specs:
+        form_data[f"name_for_{s['id']}"] = s["display_name"]
+    form_data[f"name_for_{route_jack['id']}"] = "RouteAlice"
+    resp = client.post("/teams/new", data=form_data, follow_redirects=True)
+    assert resp.status_code == 200
+    route_team = [t for t in db.list_teams() if t["name"] == "Route Rename Team"][0]
+    route_bundle = db.get_team_with_members(route_team["id"])
+    route_jack_member = [m for m in route_bundle["members"] if m["role_key"] == "qa_local"][0]
+    assert route_jack_member["display_name"] == "RouteAlice"
+    print("PASS: /teams/new route applies the name_for_<id> form fields")
+
+    before_count = len(db.list_teams())
+    dup_specs = [s for s in route_specs if not s["is_coordinator"]]
+    dup_form = {"name": "Should Not Exist", "description": ""}
+    dup_form["spec_ids"] = [str(s["id"]) for s in dup_specs]
+    for s in route_specs:
+        dup_form[f"name_for_{s['id']}"] = "SameName"
+    resp = client.post("/teams/new", data=dup_form, follow_redirects=True)
+    assert resp.status_code == 200
+    assert len(db.list_teams()) == before_count, "duplicate-name team creation must not commit"
+    print("PASS: /teams/new route rejects a duplicate in-team name and creates nothing")
+
     # 9. Dashboard with team1 selected renders team1's actual members
     # (Smith included), not any old hardcoded roster.
     resp = client.get(f"/?team_id={team1_id}")
     assert resp.status_code == 200
-    for name in (b"Delivery Lead", b"Roger", b"Michael", b"Smith"):
+    for name in (b"Delivery Lead", b"Roger", b"Michael", b"Smith", b"Jack", b"Donald"):
         assert name in resp.data, f"{name} missing from dashboard for team1"
     assert b"Delivery Team One" in resp.data
-    print("PASS: dashboard renders the selected team's real members dynamically")
+    print("PASS: dashboard renders the selected team's real members dynamically (incl. Jack/Donald)")
 
     # 10. Trigger an on-demand run and wait for the background thread to finish.
     # Pre-create the files fake_pipeline "downloads", so the BRD/TDD links'
@@ -343,6 +457,22 @@ def main():
     assert b"Site (.zip)" in resp.data
     assert b"Delivery Team One" in resp.data
     print("PASS: site.zip deliverable download route + Team column in run history")
+
+    # 11d. A run with a qa_artifacts_path serves it as application/zip via
+    # the 'qa' file_type, and its download link appears in run history.
+    qa_zip = TMP / "outputs" / "qa-artifacts.zip"
+    qa_zip.write_bytes(b"PK\x03\x04fake-qa-zip-bytes")
+    qa_run_id = db.create_run(project_id, "manual", team_name="Delivery Team One")
+    db.finish_run(
+        qa_run_id, status="success", satisfied=True, session_id="sesn_QA",
+        qa_artifacts_path=str(qa_zip),
+    )
+    resp = client.get(f"/runs/{qa_run_id}/files/qa")
+    assert resp.status_code == 200
+    assert resp.mimetype == "application/zip"
+    resp = client.get("/")
+    assert b"QA (.zip)" in resp.data
+    print("PASS: qa-artifacts.zip deliverable download route works and its link renders")
 
     # 12. Update the schedule with the new structured picker (weekly, on
     # Wednesday, 6:30:15 PM in 12h mode) - confirm it's stored AND that the

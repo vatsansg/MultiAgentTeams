@@ -187,17 +187,20 @@ def delete_run(run_id):
 
 @bp.route("/runs/<int:run_id>/files/<file_type>")
 def download_run_file(run_id, file_type):
-    """Serves a run's saved BRD, Technical Design Document, or website
-    zip so the dashboard's Files links actually open/download something,
-    instead of a placeholder href="#"."""
-    if file_type not in ("brd", "tdd", "site"):
+    """Serves a run's saved BRD, Technical Design Document, website zip,
+    or QA artifacts zip so the dashboard's Files links actually
+    open/download something, instead of a placeholder href="#"."""
+    if file_type not in ("brd", "tdd", "site", "qa"):
         abort(404)
 
     run = db.get_run(run_id)
     if run is None:
         abort(404)
 
-    path_str = {"brd": run["brd_path"], "tdd": run["tdd_path"], "site": run["site_path"]}[file_type]
+    path_str = {
+        "brd": run["brd_path"], "tdd": run["tdd_path"],
+        "site": run["site_path"], "qa": run["qa_artifacts_path"],
+    }[file_type]
     if not path_str:
         abort(404)
 
@@ -216,6 +219,11 @@ def download_run_file(run_id, file_type):
         return send_file(
             path, mimetype="application/zip", as_attachment=True,
             download_name=f"{run['project_name']}-site.zip",
+        )
+    if file_type == "qa":
+        return send_file(
+            path, mimetype="application/zip", as_attachment=True,
+            download_name=f"{run['project_name']}-qa-artifacts.zip",
         )
     return send_file(path, mimetype="text/markdown", as_attachment=False, download_name=path.name)
 
@@ -244,6 +252,17 @@ def teams():
     return render_template("teams.html", team_views=team_views)
 
 
+def _custom_names_from_form(specs) -> dict:
+    """Reads the per-role 'name_for_<spec_id>' text fields the team
+    create/edit forms submit alongside their role checkboxes."""
+    custom_names = {}
+    for spec in specs:
+        raw = request.form.get(f"name_for_{spec['id']}", "").strip()
+        if raw:
+            custom_names[spec["id"]] = raw
+    return custom_names
+
+
 @bp.route("/teams/new", methods=["GET", "POST"])
 def new_team():
     if request.method == "POST":
@@ -257,10 +276,14 @@ def new_team():
         if not specs:
             flash("No agent specs exist yet - cannot create a team.", "error")
             return redirect(url_for("dashboard.new_team"))
+        custom_names = _custom_names_from_form(specs)
         try:
-            team_id = db.create_team(name, description, spec_ids)
+            team_id = db.create_team(name, description, spec_ids, custom_names)
         except db.DuplicateNameError:
             flash(f'A team named "{name}" already exists.', "error")
+            return redirect(url_for("dashboard.new_team"))
+        except db.DuplicateTeamMemberNameError as exc:
+            flash(str(exc), "error")
             return redirect(url_for("dashboard.new_team"))
         member_count = len(db.list_team_members(team_id))
         flash(f'Team "{name}" created with {member_count} agent(s).', "success")
@@ -289,8 +312,23 @@ def edit_team(team_id):
             flash(f'A team named "{name}" already exists.', "error")
             return redirect(url_for("dashboard.edit_team", team_id=team_id))
 
-        changed = db.update_team_members(team_id, spec_ids)
-        if changed:
+        specs = db.list_agent_specs()
+        custom_names = _custom_names_from_form(specs)
+        try:
+            scope = db.update_team_members(team_id, spec_ids, custom_names)
+        except db.DuplicateTeamMemberNameError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("dashboard.edit_team", team_id=team_id))
+
+        if scope == "all":
+            for member in db.list_team_members(team_id):
+                pipeline.invalidate_cached_agent(member["cache_key"])
+            flash(
+                "Team updated - a name changed, which can appear in other agents' prompts too "
+                "(e.g. Donald's prompt mentions Jack by name), so every agent on this team will "
+                "be recreated on the platform the next time it runs.", "success",
+            )
+        elif scope == "coordinator":
             coordinator_cache_key = db.get_team_coordinator_cache_key(team_id)
             if coordinator_cache_key:
                 pipeline.invalidate_cached_agent(coordinator_cache_key)
@@ -305,10 +343,15 @@ def edit_team(team_id):
     member_spec_ids = {
         m["agent_spec_id"] for m in db.list_team_members(team_id) if m["agent_spec_id"] is not None
     }
+    current_names = {
+        m["agent_spec_id"]: m["display_name"]
+        for m in db.list_team_members(team_id) if m["agent_spec_id"] is not None
+    }
     return render_template(
         "team_edit.html", team=team,
         specs=[_spec_view(s) for s in db.list_agent_specs()],
         member_spec_ids=member_spec_ids,
+        current_names=current_names,
     )
 
 

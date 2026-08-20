@@ -305,6 +305,7 @@
           {% if r['brd_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='brd') }}" title="{{ r['brd_path'] }}" target="_blank" rel="noopener">BRD</a>{% endif %}
           {% if r['tdd_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='tdd') }}" title="{{ r['tdd_path'] }}" target="_blank" rel="noopener">TDD</a>{% endif %}
           {% if r['site_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='site') }}" title="{{ r['site_path'] }}">Site (.zip)</a>{% endif %}
+          {% if r['qa_artifacts_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='qa') }}" title="{{ r['qa_artifacts_path'] }}">QA (.zip)</a>{% endif %}
         </td>
         <td class="run-error">
           {% if r['error'] %}

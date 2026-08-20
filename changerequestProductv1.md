@@ -125,6 +125,84 @@ guard, and the generalized teardown roster. **Files:** `README.md`,
 `RUNBOOK.md`, `docs/multi-agent-teams.md` (new), `tests/test_smoke.py`,
 this file.
 
+## CR-10: Dynamic team composition (choose roles at creation + edit membership later)
+
+Originally CR-1 through CR-9 shipped with "a team always gets the full
+current catalog" (matching a literal reading of the initial request).
+Follow-up clarification: teams need a real picker. Added a `spec_ids`
+parameter to `db.create_team` (checkbox list on the Create Team form,
+defaulting to all checked; the coordinator has no checkbox and is always
+force-included) and a new `db.update_team_members(team_id, spec_ids)` +
+`GET/POST /teams/<id>/edit` + `templates/team_edit.html` for changing an
+existing team's roles afterward. Since the coordinator's `multiagent`
+roster and dynamic system prompt are only assembled at agent-creation
+time, a membership change that's real (not a no-op resubmit) calls the
+new `pipeline.invalidate_cached_agent()` on just the team's coordinator
+cache_key, forcing it to be recreated with the updated roster on the next
+run - without needing to touch the team's other, unaffected specialist
+agents. **Files:** `db.py`, `pipeline.py`, `dashboard.py`,
+`templates/team_new.html`, `templates/team_edit.html` (new),
+`templates/teams.html`, `templates/base.html` (sidebar active-link),
+`tests/test_smoke.py`.
+
+## CR-11: Two QA Tester roles (Jack - local, Donald - cloud)
+
+Added `qa_local` (Jack) and `qa_cloud` (Donald) to the agent catalog,
+treated identically to Business Analyst/Solution Architect/Developer -
+same `agent_specs` shape, same team-membership picker, same dynamic
+coordinator delegation/rubric/outcome-description wiring, same teardown
+roster (already fully dynamic from CR-2, so Jack/Donald required **zero**
+teardown code changes - see `docs/multi-agent-teams.md`). Jack reviews
+BRD/TDD/scope and writes+executes a test plan/test cases against
+Smith's site running locally; Donald builds on Jack's artifacts and
+re-validates in the shared cloud sandbox environment (see
+`docs/multi-agent-teams.md`'s explicit note on what "cloud" honestly
+means here, absent a deployment agent). Both package their output as
+`qa-artifacts.zip`. Added `PipelineResult.qa_artifacts_path`,
+`runs.qa_artifacts_path` column, the `/runs/<id>/files/qa` download
+route, and a "QA (.zip)" link in run history's Files column.
+
+Also switched `agent_specs` seeding from "once, only if the table is
+empty" to **idempotent per-`role_key`, every startup** - this is what let
+Jack and Donald backfill into the already-existing local database without
+a wipe, and is now the supported way to add any future role. **Files:**
+`../labs/shared/prompts.py`, `agent_specs_seed.py`, `db.py`,
+`pipeline.py`, `run_manager.py`, `dashboard.py`,
+`templates/dashboard.html`, `tests/test_smoke.py`, `README.md`,
+`RUNBOOK.md`, `docs/multi-agent-teams.md`.
+
+## CR-12: Per-team agent renaming (unique within a team)
+
+Each role can now be given its own display name for a given team, at
+creation or via Edit - a `name_for_<agent_spec_id>` text field per role
+on both forms, defaulting to the catalog name. The only rule: names must
+be unique *within* a team (`db._validate_unique_names`, case-insensitive
+- raises the new `DuplicateTeamMemberNameError`), never globally.
+
+Renaming isn't just a `display_name` column write: several system
+prompts refer to their agent by name in prose (`BA_SPECIALIST_SYSTEM`
+opens "You are Roger..."), and one prompt cross-references a *different*
+agent by name (Donald's own system prompt says "...Jack's artifacts").
+New `db._apply_name_renames()` word-boundary-substitutes a role's
+original catalog name for its team-specific name across every included
+member's `system_prompt`/`handoff_instructions` - both self- and
+cross-references - always re-derived from the pristine `agent_specs` text
+(never from an already-substituted `team_members` row), so cumulative
+renames across multiple edits never drift or silently revert (covered by
+a dedicated smoke-test sequence: rename Jack→Alice→Charlie, then an
+unrelated edit renaming only Smith, confirming Donald's prompt still says
+"Charlie" afterward).
+
+`db.update_team_members` now returns `"none"`/`"coordinator"`/`"all"`
+instead of a bool - membership-only changes (add/remove a role) still
+only invalidate the coordinator's cached agent, but **any** rename
+invalidates **every** member's cached agent (deliberately conservative -
+a rename could be cross-referenced in any other member's prompt text, and
+computing the exact minimal blast radius isn't worth the complexity for
+a low-frequency admin action). **Files:** `db.py`, `dashboard.py`,
+`templates/team_new.html`, `templates/team_edit.html`,
+`tests/test_smoke.py`, `README.md`, `docs/multi-agent-teams.md`.
+
 ---
 
 ## Recommended further improvements
@@ -132,31 +210,30 @@ this file.
 Scoped out of this pass deliberately - listed here so they're a decision,
 not an oversight:
 
-- **Team-membership editing after creation** - swap or remove a single
-  role from an existing team without recreating the whole team. Today a
-  team is an immutable snapshot from creation time.
-- **A QA agent role** - explicitly deferred by the user's own request
-  ("later will be a QA"). The catalog/team/handoff-instructions model
-  makes adding it straightforward when it's time (see
-  `docs/multi-agent-teams.md`'s "Adding a fifth role").
 - **A deployment agent** - Smith's website deliverable is local-run-only
-  by design; deploying it anywhere is explicitly out of scope for this
-  pass, per the user's own instruction.
+  by design, and Donald's "cloud" QA pass is explicitly the existing
+  Managed Agents sandbox, not a real hosted deployment (see
+  `docs/multi-agent-teams.md`). Deploying anywhere is explicitly out of
+  scope for this pass, per the user's own instruction.
 - **Agent-spec versioning/audit trail** - who changed a spec's prompt,
   when, and a diff view. Today an edit just overwrites the row.
-- **Automated testing of Smith's actually-built website output** - this
-  pass only verifies the pipeline plumbing (`site_path` flows through
+- **Automated testing of Smith's actually-built website output, and of
+  Jack/Donald's actual QA findings** - this pass only verifies the
+  pipeline plumbing (`site_path`/`qa_artifacts_path` flow through
   correctly end to end); it does not execute or evaluate the runtime
-  correctness of the AI-generated application code itself.
+  correctness of AI-generated application code or AI-generated test
+  results.
 - **Rate-limiting/monitoring the now-broader sandbox network egress** -
   `allow_package_managers: True` plus the npm/PyPI/Maven/NuGet/GitHub
-  allowlist is unconditional once any team includes the Developer role.
+  allowlist is unconditional once any team includes Developer or QA.
 - **Multi-user/team ownership** - still a single shared login; there's no
   "who created this team/project" tracking.
-- **Full `agent_specs` CRUD** - creating new roles, deleting roles, or
-  reassigning `is_coordinator` through the UI. This pass only edits the 4
-  seeded rows' text/skills/prompt fields.
-- **Partial team composition at creation time** - choosing which roles to
-  attach to a new team, rather than always attaching the full current
-  catalog. Matches the user's explicit request for this pass, but is a
-  natural next increment.
+- **Full `agent_specs` CRUD** - creating brand-new roles or deleting/
+  reassigning `is_coordinator` through the UI (new roles today are added
+  by editing `agent_specs_seed.py` and restarting - see
+  `docs/multi-agent-teams.md`). This pass only lets the UI edit an
+  existing seeded role's text/skills/prompt fields.
+- **A dedicated QA-to-Developer feedback loop** - today Jack/Donald report
+  defects in `qa-report-*.md`, but nothing routes a defect back to Smith
+  for a fix within the same run; a human (or a future run) has to act on
+  the QA report manually.

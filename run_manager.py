@@ -97,6 +97,7 @@ def start_run(project_id: int, trigger_type: str) -> int:
                 brd_path=result.brd_path,
                 tdd_path=result.tdd_path,
                 site_path=result.site_path,
+                qa_artifacts_path=result.qa_artifacts_path,
                 cost_usd=result.cost_usd,
             )
         except pipeline.PipelineStopped as exc:

@@ -6,11 +6,11 @@
     <div class="section-head-text">
       <p class="eyebrow">Teams</p>
       <h2>Edit {{ team.name }}</h2>
-      <p class="muted">Add or remove specialist roles. The coordinator (Delivery Lead) is always included and can't be removed. If membership changes, the coordinator is recreated on the platform the next time this team runs, so it picks up the new roster.</p>
+      <p class="muted">Add or remove specialist roles, or rename any of them for this team (names just need to be unique within the team). The coordinator (Delivery Lead) is always included and can't be removed. If membership or a name changes, the affected agent(s) are recreated on the platform the next time this team runs.</p>
     </div>
   </div>
 
-  <form method="post" class="new-project-form" style="max-width: 480px;">
+  <form method="post" class="new-project-form" style="max-width: 640px;">
     <label>Team name
       <input type="text" name="name" required maxlength="120" value="{{ team.name }}">
     </label>
@@ -19,21 +19,19 @@
     </label>
 
     <div class="field-label" style="margin-top: var(--sp-2);">Roles</div>
-    <div class="agent-meta">
-      {% for spec in specs %}
+    {% for spec in specs %}
+    <div class="schedule-picker-row" style="align-items: center;">
       {% if spec.is_coordinator %}
-      <label style="display: flex; align-items: center; gap: 6px;">
-        <input type="checkbox" checked disabled>
-        {{ spec.display_name }} &middot; {{ spec.role_title }} <span class="muted">(always included, coordinator)</span>
-      </label>
+      <input type="checkbox" checked disabled title="Always included, coordinator">
       {% else %}
-      <label style="display: flex; align-items: center; gap: 6px;">
-        <input type="checkbox" name="spec_ids" value="{{ spec.id }}" {{ 'checked' if spec.id in member_spec_ids }}>
-        {{ spec.display_name }} &middot; {{ spec.role_title }}
-      </label>
+      <input type="checkbox" name="spec_ids" value="{{ spec.id }}" {{ 'checked' if spec.id in member_spec_ids }}>
       {% endif %}
-      {% endfor %}
+      <span style="min-width: 190px;">{{ spec.role_title }}{% if spec.is_coordinator %} <span class="muted">(coordinator)</span>{% endif %}</span>
+      <label style="flex: 1;">Name for this team
+        <input type="text" name="name_for_{{ spec.id }}" value="{{ current_names.get(spec.id, spec.display_name) }}" maxlength="60">
+      </label>
     </div>
+    {% endfor %}
 
     <div class="new-project-actions">
       <a class="btn" href="{{ url_for('dashboard.teams') }}">Cancel</a>

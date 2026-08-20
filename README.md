@@ -22,12 +22,16 @@ instead of a person stepping through notebook cells.
 
 Since then, the fixed two-specialist roster has become a **DB-backed
 catalog of agent roles + Teams**: an `agent_specs` table holds every
-available role (Delivery Lead, Business Analyst "Roger", Solution
-Architect "Michael", and a full-stack Developer "Smith" who turns a
-Technical Design Document into a locally-runnable website), and a "Team"
-is a named, described snapshot of that catalog that a project picks
-before it can run. See "Teams and the agent catalog" below and
-`docs/multi-agent-teams.md` for the full design.
+available role - Delivery Lead (coordinator), Business Analyst "Roger",
+Solution Architect "Michael", a full-stack Developer "Smith" who turns a
+Technical Design Document into a locally-runnable website, and two QA
+Testers - "Jack" (tests in the local dev environment) and "Donald" (takes
+Jack's artifacts and extends testing in the shared cloud sandbox
+environment) - and a "Team" is a named snapshot of a *chosen subset* of
+that catalog that a project picks before it can run (choose roles at
+creation, or add/remove them later from the team's Edit page). See "Teams
+and the agent catalog" below and `docs/multi-agent-teams.md` for the full
+design.
 
 The problem this solves: the notebook is great, but a notebook can't
 be clicked by someone who isn't a developer, it can't run itself at 6am
@@ -42,10 +46,13 @@ non-technical scheduling picker.
   cookie. Not multi-user; this is your own personal console.
 - **Agents catalog** (sidebar: Agents) - a read-only view of every agent
   role available, its description, skills, and default tools.
-- **Teams** (sidebar: Teams) - create a named, described team; it's
-  bundled with every role currently in the catalog (Delivery Lead +
-  Business Analyst + Solution Architect + Developer). A team can't be
-  deleted while a project still uses it.
+- **Teams** (sidebar: Teams) - create a named, described team by checking
+  which roles it should include (Delivery Lead is always included as
+  coordinator) and, optionally, giving each role its own name **for this
+  team** (names just need to be unique within the team - the same name is
+  fine on two different teams); **Edit** an existing team to add/remove
+  specialists or rename any of them later. A team can't be deleted while
+  a project still uses it.
 - **Agent Specs** (sidebar: Agent Specs) - edit a role's description,
   skills, and system prompt, with a rule-based "Validate" check before
   saving. Editing a spec only affects *new* teams - a team's
@@ -162,8 +169,8 @@ to any team composition instead of one fixed pair of specialists.
 | `pipeline.py` | The team-driven Managed Agents logic - agent/environment/session creation, dynamic coordinator prompt + rubric assembly, callable headlessly |
 | `scheduler.py` | APScheduler wiring - parses the dashboard's structured schedule fields into daily/weekly/monthly/interval triggers |
 | `db.py` | SQLite schema and queries for `agent_specs`, `teams`, `team_members`, `projects`, and `runs` |
-| `agent_specs_seed.py` | Default catalog (Delivery Lead, Roger, Michael, Smith) seeded into `agent_specs` on first startup |
-| `templates/` | `base.html` (topbar + sidebar shell), `login.html`, `dashboard.html`, `agents.html`, `teams.html`, `team_new.html`, `agent_specs.html`, `agent_spec_edit.html` |
+| `agent_specs_seed.py` | Default catalog (Delivery Lead, Roger, Michael, Smith, Jack, Donald) - each role seeded into `agent_specs` idempotently on every startup, so a new role added here backfills into an existing database automatically |
+| `templates/` | `base.html` (topbar + sidebar shell), `login.html`, `dashboard.html`, `agents.html`, `teams.html`, `team_new.html`, `team_edit.html`, `agent_specs.html`, `agent_spec_edit.html` |
 | `static/style.css` | All styling - no CSS framework |
 | `tests/test_smoke.py` | End-to-end test with a mocked pipeline - no API key needed |
 | `RUNBOOK.md` | Numbered, step-by-step setup and operating instructions |
@@ -177,46 +184,70 @@ model:
 
 - **`agent_specs`** is the catalog - one row per available role
   (`delivery_lead`, `business_analyst`, `solution_architect`,
-  `developer`), each with a `system_prompt`, `handoff_instructions` (used
-  to build the coordinator's delegation step - see below), `skills`, and
-  `tools_label`. Seeded once, on first startup, from
-  `agent_specs_seed.py`. Edit a row's text/skills/prompt from the
+  `developer`, `qa_local`, `qa_cloud`), each with a `system_prompt`,
+  `handoff_instructions` (used to build the coordinator's delegation step
+  - see below), `skills`, and `tools_label`. Seeded idempotently, by
+  `role_key`, on *every* startup from `agent_specs_seed.py` - a role
+  already in the table is never touched, but a role in
+  `DEFAULT_AGENT_SPECS` that isn't in the table yet gets inserted, so
+  adding a new role there backfills automatically into an existing
+  database (no wipe needed - this is how Jack and Donald were added
+  after Smith already shipped). Edit a row's text/skills/prompt from the
   dashboard's **Agent Specs** page (with a rule-based "Validate" check);
   `role_key` and coordinator status aren't editable there.
 - **`teams`** + **`team_members`** - creating a team (**Teams** page)
-  snapshots every current `agent_specs` row into `team_members` at that
-  moment. This means editing the catalog later only affects teams created
-  *after* the edit - an existing team's already-provisioned platform
-  agent keeps whatever prompt it was created with (same
-  recreate-to-update caveat "Customizing... below always had, just now
-  scoped per team instead of globally). Each member gets a
-  team-namespaced `cache_key` (`team<id>_<role_key>`) in
-  `data/agent_cache.json`, so two teams both having e.g. a
-  `business_analyst` never collide.
-- **Adding a fifth role** (a QA agent, say): write its system prompt in
-  `../labs/shared/prompts.py` (additive only - see the note at the top of
-  that file about the notebook depending on the existing constants),
-  add a matching entry to `agent_specs_seed.py`'s `DEFAULT_AGENT_SPECS`,
-  then either wipe `data/agent_console.sqlite3`'s `agent_specs` table to
-  reseed, or insert the row directly. New teams created afterward will
-  include it automatically; existing teams won't.
+  lets you check which roles to include (Delivery Lead is always
+  included as coordinator) and snapshots just those `agent_specs` rows
+  into `team_members` at that moment. **Edit** an existing team
+  (**Teams** page) to add or remove specialist roles afterward - if
+  membership actually changes, the team's coordinator's cached platform
+  agent id is invalidated (`pipeline.invalidate_cached_agent`) so it's
+  recreated with the new roster and system prompt the next time that
+  team runs (its `multiagent.agents` list and delegation steps are only
+  assembled at agent-creation time - editing `team_members` alone doesn't
+  retroactively change an already-provisioned coordinator). Editing the
+  catalog itself only affects teams created *after* the edit - an
+  existing team's already-provisioned specialist agents keep whatever
+  prompt they were created with (same recreate-to-update caveat
+  "Customizing..." below always had, just now scoped per team instead of
+  globally). Each member gets a team-namespaced `cache_key`
+  (`team<id>_<role_key>`) in `data/agent_cache.json`, so two teams both
+  having e.g. a `business_analyst` never collide.
+- **Per-team agent renaming** - each role can be given its own display
+  name for a given team (create or edit form: a text field per role,
+  defaulting to the catalog name), enforced unique *within that team*
+  only (case-insensitive) - the same name is fine reused on a different
+  team. A rename text-substitutes the role's original catalog name for
+  the new one everywhere it appears in that role's own
+  `system_prompt`/`handoff_instructions` **and** in every other included
+  member's prompt text that mentions it by name (e.g. Donald's own prompt
+  literally says "Jack's artifacts" - renaming Jack updates that
+  reference too). Because a rename can touch more than one member's
+  prompt, editing a name on an existing team invalidates **every**
+  member's cached platform agent id, not just the coordinator's - see
+  `docs/multi-agent-teams.md` for the full reasoning.
 - **The coordinator's system prompt is assembled at agent-creation time**,
   not stored verbatim: `pipeline._build_coordinator_system()` takes the
   coordinator's stored template (which contains the literal tokens
   `{{DELEGATION_STEPS}}` and `{{CLOSING_STEPS}}`) and substitutes in a
   numbered delegation list built from each specialist's
-  `handoff_instructions`, plus closing steps that are conditional on the
-  team's actual composition (e.g. a Developer-only team's coordinator
-  isn't told to file a BRD nobody produced).
-- **The Developer role ("Smith")** gets the full, unscoped tool set
-  (including bash) instead of the BA/Architect's scoped write/read-only
-  set, because it needs to install dependencies and run a local dev/build
-  command. The shared sandbox environment's `allowed_hosts` includes the
-  npm/PyPI/Maven/NuGet registries and GitHub, and
-  `allow_package_managers` is enabled - broadened once, in place, for
-  every team (see `docs/multi-agent-teams.md` for the reasoning). Smith
-  packages the finished site as `/mnt/session/outputs/site.zip`, which the
-  dashboard serves as a `.zip` download next to the BRD/TDD links.
+  `handoff_instructions`, in `sequence` order, plus closing steps that
+  are conditional on the team's actual composition (e.g. a Developer-only
+  team's coordinator isn't told to file a BRD nobody produced, and a
+  team with no QA role isn't told to deliver QA artifacts).
+- **The Developer role ("Smith")** and both QA roles ("Jack"/"Donald")
+  get the full, unscoped tool set (including bash) instead of the
+  BA/Architect's scoped write/read-only set, because they need to
+  install dependencies and actually run the site (Smith to build it,
+  Jack/Donald to test it). The shared sandbox environment's
+  `allowed_hosts` includes the npm/PyPI/Maven/NuGet registries and
+  GitHub, and `allow_package_managers` is enabled - broadened once, in
+  place, for every team (see `docs/multi-agent-teams.md` for the
+  reasoning). Smith packages the finished site as
+  `/mnt/session/outputs/site.zip`; Jack (local QA) and then Donald (cloud
+  QA, building on Jack's artifacts) package their test plan, test cases,
+  and QA report(s) as `/mnt/session/outputs/qa-artifacts.zip` - both
+  served as `.zip` downloads next to the BRD/TDD links in run history.
 
 ## How scheduling actually works
 

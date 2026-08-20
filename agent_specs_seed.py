@@ -1,5 +1,7 @@
-"""Seed data for the agent_specs catalog, inserted once by
-db._seed_agent_specs_if_empty() on a fresh/upgraded database.
+"""Seed data for the agent_specs catalog, inserted by
+db._seed_default_agent_specs() on every startup - idempotent per
+role_key, so adding a new entry here also backfills it into an existing
+database (no DB wipe needed) the next time the app starts.
 
 Imported lazily (inside that function, not at db.py's module level) so
 db.py itself never needs the labs/shared sys.path trick pipeline.py
@@ -16,6 +18,8 @@ from prompts import (  # noqa: E402
     BA_SPECIALIST_SYSTEM, BA_HANDOFF_INSTRUCTIONS,
     ARCHITECT_SPECIALIST_SYSTEM, ARCHITECT_HANDOFF_INSTRUCTIONS,
     DEVELOPER_SPECIALIST_SYSTEM, DEVELOPER_HANDOFF_INSTRUCTIONS,
+    QA_LOCAL_SPECIALIST_SYSTEM, QA_LOCAL_HANDOFF_INSTRUCTIONS,
+    QA_CLOUD_SPECIALIST_SYSTEM, QA_CLOUD_HANDOFF_INSTRUCTIONS,
 )
 
 DEFAULT_AGENT_SPECS = [
@@ -55,5 +59,27 @@ DEFAULT_AGENT_SPECS = [
             "SQLite", "MySQL", "CosmosDB", "SQL Server", "Oracle", "Responsive design",
         ]),
         "tools_label": "full toolset incl. bash (unscoped)", "is_coordinator": 0, "sequence": 3,
+    },
+    {
+        "role_key": "qa_local", "display_name": "Jack", "role_title": "QA Tester (Local)",
+        "description": ("Reviews the BRD, TDD, and project scope, then writes and executes a test "
+                         "plan and test cases against the site running locally."),
+        "system_prompt": QA_LOCAL_SPECIALIST_SYSTEM, "handoff_instructions": QA_LOCAL_HANDOFF_INSTRUCTIONS,
+        "skills": json.dumps([
+            "Test planning", "Test case design", "Functional testing",
+            "Local environment QA", "Defect reporting", "Requirements traceability",
+        ]),
+        "tools_label": "full toolset incl. bash (unscoped)", "is_coordinator": 0, "sequence": 4,
+    },
+    {
+        "role_key": "qa_cloud", "display_name": "Donald", "role_title": "QA Tester (Cloud)",
+        "description": ("Builds on Jack's local QA artifacts to validate and extend testing in the "
+                         "shared cloud sandbox environment, producing the final QA report."),
+        "system_prompt": QA_CLOUD_SPECIALIST_SYSTEM, "handoff_instructions": QA_CLOUD_HANDOFF_INSTRUCTIONS,
+        "skills": json.dumps([
+            "Regression testing", "Cloud environment QA", "Test case validation",
+            "Defect reporting", "Requirements traceability",
+        ]),
+        "tools_label": "full toolset incl. bash (unscoped)", "is_coordinator": 0, "sequence": 5,
     },
 ]
