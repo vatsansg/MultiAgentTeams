@@ -9,6 +9,7 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 
 import config
 import db
+import local_runner
 import pipeline
 import run_manager
 import scheduler
@@ -66,6 +67,7 @@ def create_project():
     name = request.form.get("name", "").strip()
     brief = request.form.get("brief", "").strip()
     team_id = request.form.get("team_id", type=int)
+    local_folder = request.form.get("local_folder", "").strip()
 
     if not name or not brief:
         flash("Project name and brief are required.", "error")
@@ -73,13 +75,21 @@ def create_project():
     if not team_id or db.get_team(team_id) is None:
         flash("Pick a team before creating a project.", "error")
         return redirect(url_for("dashboard.index"))
+    if not local_folder:
+        flash(
+            "Local folder is required - this is where the build, BRD/TDD, and "
+            "local QA artifacts get created and tested before anything is filed "
+            "to source control.",
+            "error",
+        )
+        return redirect(url_for("dashboard.index", team_id=team_id))
 
     schedule, error = scheduler.parse_schedule_form(request.form)
     if error:
         flash(error, "error")
         return redirect(url_for("dashboard.index", team_id=team_id))
 
-    project_id = db.create_project(name, brief, team_id, schedule)
+    project_id = db.create_project(name, brief, team_id, schedule, local_folder)
     if schedule:
         scheduler.add_or_update_job(project_id, schedule)
     return redirect(url_for("dashboard.index", team_id=team_id))
@@ -109,7 +119,16 @@ def update_schedule(project_id):
 @bp.route("/projects/<int:project_id>/delete", methods=["POST"])
 def delete_project(project_id):
     scheduler.remove_job(project_id)
+    local_runner.stop_dev_server(project_id)
     db.delete_project(project_id)
+    return redirect(url_for("dashboard.index"))
+
+
+@bp.route("/projects/<int:project_id>/stop-dev-server", methods=["POST"])
+def stop_dev_server(project_id):
+    local_runner.stop_dev_server(project_id)
+    db.stop_dev_server_status_for_project(project_id)
+    flash("Local dev server stopped.", "success")
     return redirect(url_for("dashboard.index"))
 
 
@@ -206,11 +225,16 @@ def download_run_file(run_id, file_type):
 
     path = Path(path_str)
     # Defense in depth: only ever serve files pipeline.py itself downloaded,
-    # which always land under config.OUTPUTS_DIR - never an arbitrary path
-    # that might end up in the database some other way.
-    try:
-        path.resolve().relative_to(config.OUTPUTS_DIR.resolve())
-    except ValueError:
+    # which always land either under config.OUTPUTS_DIR (the default) or
+    # under this run's project's local_folder (when the project has one
+    # set) - never an arbitrary path that might end up in the database some
+    # other way.
+    project = db.get_project(run["project_id"])
+    allowed_roots = [config.OUTPUTS_DIR.resolve()]
+    if project and project["local_folder"]:
+        allowed_roots.append(Path(project["local_folder"]).resolve())
+    resolved = path.resolve()
+    if not any(resolved == root or root in resolved.parents for root in allowed_roots):
         abort(404)
     if not path.exists():
         abort(404)

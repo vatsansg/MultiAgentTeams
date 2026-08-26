@@ -175,6 +175,7 @@
         <th>Project</th>
         <th>Team</th>
         <th>Brief</th>
+        <th>Local folder</th>
         <th>Schedule</th>
         <th></th>
       </tr>
@@ -189,6 +190,9 @@
             {{ p['brief'][:50] }}{% if p['brief']|length > 50 %}&hellip;{% endif %}
           </button>
           <template id="brief-{{ p['id'] }}">{{ p['brief'] }}</template>
+        </td>
+        <td class="local-folder-cell" title="{{ p['local_folder'] or '' }}">
+          {% if p['local_folder'] %}<code>{{ p['local_folder'] }}</code>{% else %}—{% endif %}
         </td>
         <td>
           {% if p['schedule_enabled'] %}
@@ -215,7 +219,7 @@
         </td>
       </tr>
       {% else %}
-      <tr class="empty-row"><td colspan="5">
+      <tr class="empty-row"><td colspan="6">
         <div class="empty-state">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 4v5"/></svg>
           <strong>No projects yet</strong>
@@ -243,6 +247,11 @@
 
       <label>Project name
         <input type="text" name="name" required placeholder="Boutique Coffee Roastery Website">
+      </label>
+
+      <label>Local folder
+        <input type="text" name="local_folder" required placeholder="C:\dev\projects\coffee-roastery-site">
+        <span class="field-hint">Absolute path on this machine where the build, BRD/TDD, and local QA artifacts get created and tested (Developer through QA Tester (Local)). Source control and authentication for this folder are gathered as a later step, not at project creation.</span>
       </label>
 
       <div class="brief-field">
@@ -287,6 +296,7 @@
         <th>Cost (est.)</th>
         <th>Started</th>
         <th>Files</th>
+        <th>Local site</th>
         <th>Error</th>
         <th></th>
       </tr>
@@ -306,6 +316,23 @@
           {% if r['tdd_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='tdd') }}" title="{{ r['tdd_path'] }}" target="_blank" rel="noopener">TDD</a>{% endif %}
           {% if r['site_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='site') }}" title="{{ r['site_path'] }}">Site (.zip)</a>{% endif %}
           {% if r['qa_artifacts_path'] %}<a href="{{ url_for('dashboard.download_run_file', run_id=r['id'], file_type='qa') }}" title="{{ r['qa_artifacts_path'] }}">QA (.zip)</a>{% endif %}
+        </td>
+        <td class="dev-server-cell" data-dev-server-status="{{ r['dev_server_status'] or '' }}">
+          {% if r['dev_server_status'] == 'ready' %}
+            <a href="{{ r['dev_server_url'] }}" target="_blank" rel="noopener" class="pill pill-ok">Open site&nbsp;&#8599;</a>
+            <form method="post" action="{{ url_for('dashboard.stop_dev_server', project_id=r['project_id']) }}" style="display:inline;">
+              <button type="submit" class="btn" style="padding: 2px 8px; font-size: 0.78rem;">Stop</button>
+            </form>
+          {% elif r['dev_server_status'] == 'starting' %}
+            <span class="pill pill-pending">Starting&hellip;</span>
+          {% elif r['dev_server_status'] == 'failed' %}
+            <details>
+              <summary class="error-summary pill pill-pending">Failed to start</summary>
+              <pre class="error-full">{{ r['dev_server_error'] }}</pre>
+            </details>
+          {% elif r['dev_server_status'] == 'stopped' %}
+            <span class="pill pill-pending">Stopped</span>
+          {% else %}—{% endif %}
         </td>
         <td class="run-error">
           {% if r['error'] %}
@@ -330,7 +357,7 @@
         </td>
       </tr>
       {% else %}
-      <tr class="empty-row"><td colspan="10">
+      <tr class="empty-row"><td colspan="11">
         <div class="empty-state">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 8v4l2.5 2.5"/><circle cx="12" cy="12" r="9"/></svg>
           <strong>No runs yet</strong>
@@ -633,6 +660,33 @@ async function pollRuns() {
         // instead of hand-patching five more cells here.
         if (r.status !== 'running') {
           setTimeout(() => window.location.reload(), 600);
+        }
+      }
+
+      // Local dev-server status keeps changing (null -> starting ->
+      // ready/failed) for up to a couple minutes *after* the run itself
+      // already shows success/failed and the one-time reload above has
+      // already fired - so this cell needs its own live patch every
+      // tick, not just the reload-on-run-finish above.
+      const devCell = row.querySelector('.dev-server-cell');
+      const devStatus = r.dev_server_status || '';
+      if (devCell && devCell.dataset.devServerStatus !== devStatus) {
+        devCell.dataset.devServerStatus = devStatus;
+        if (devStatus === 'ready') {
+          devCell.innerHTML =
+            `<a href="${r.dev_server_url}" target="_blank" rel="noopener" class="pill pill-ok">Open site&nbsp;&#8599;</a>` +
+            `<form method="post" action="/projects/${r.project_id}/stop-dev-server" style="display:inline;">` +
+            `<button type="submit" class="btn" style="padding: 2px 8px; font-size: 0.78rem;">Stop</button></form>`;
+        } else if (devStatus === 'starting') {
+          devCell.innerHTML = '<span class="pill pill-pending">Starting&hellip;</span>';
+        } else if (devStatus === 'failed') {
+          const err = (r.dev_server_error || '').replace(/</g, '&lt;');
+          devCell.innerHTML =
+            `<details><summary class="error-summary pill pill-pending">Failed to start</summary><pre class="error-full">${err}</pre></details>`;
+        } else if (devStatus === 'stopped') {
+          devCell.innerHTML = '<span class="pill pill-pending">Stopped</span>';
+        } else {
+          devCell.textContent = '—';
         }
       }
     }

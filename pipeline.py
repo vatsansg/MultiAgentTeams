@@ -658,6 +658,7 @@ def run_delivery_pipeline(
     project_brief: str,
     team: dict,
     *,
+    local_folder: str = None,
     max_iterations: int = None,
     on_event: Optional[Callable[[dict], None]] = None,
     should_stop: Optional[Callable[[], bool]] = None,
@@ -665,6 +666,14 @@ def run_delivery_pipeline(
     """Run the full delivery pipeline for one project, using the given
     team bundle (see db.get_team_with_members) to determine which agents
     exist and what they're asked to deliver.
+
+    local_folder, if given, is an absolute path on this machine - the
+    project's `projects.local_folder` value - and deliverables (BRD, TDD,
+    site.zip, qa-artifacts.zip) are downloaded there instead of the default
+    `config.OUTPUTS_DIR / slug`. This is where the site actually gets built
+    and tested locally through QA Tester (Local); hooking it up to source
+    control and any deploy authentication is a separate, later step, not
+    handled by this pipeline run.
 
     on_event, if given, is called with a small dict for every meaningful
     stream event (thread spawned, specialist returned, mcp call, grading
@@ -763,8 +772,8 @@ def run_delivery_pipeline(
                 emit("status", message="session idle")
                 break
 
-    project_dir = config.OUTPUTS_DIR / slug
-    project_dir.mkdir(exist_ok=True)
+    project_dir = Path(local_folder) if local_folder else config.OUTPUTS_DIR / slug
+    project_dir.mkdir(parents=True, exist_ok=True)
     role_keys = {m["role_key"] for m in team["members"]}
     wanted = {}
     if "business_analyst" in role_keys:

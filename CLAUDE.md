@@ -135,3 +135,13 @@ on next startup).
 - **Dark mode** was not implemented - the design system's tokens make it a
   plausible follow-up (swap `:root` values under `prefers-color-scheme`)
   but it wasn't part of this pass.
+- **Source control + authentication for `projects.local_folder`.** A
+  project now captures a required local folder at creation time
+  (`projects.local_folder`) - the pipeline downloads BRD/TDD/site.zip/
+  qa-artifacts.zip there instead of `config.OUTPUTS_DIR / slug` when set,
+  so the site is built and QA'd locally through QA Tester (Local) in a
+  folder the user chose. Deliberately out of scope for that same pass:
+  capturing a source-control remote (where the local folder's contents
+  get pushed) and whatever authentication that push needs (SSH key, PAT,
+  etc.) - both still need to be designed and added as project fields in a
+  later pass.

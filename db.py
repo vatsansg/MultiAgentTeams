@@ -125,6 +125,10 @@ def init_db():
         _add_column_if_missing(conn, "runs", "team_name", "TEXT")
         _add_column_if_missing(conn, "runs", "site_path", "TEXT")
         _add_column_if_missing(conn, "runs", "qa_artifacts_path", "TEXT")
+        _add_column_if_missing(conn, "projects", "local_folder", "TEXT")
+        _add_column_if_missing(conn, "runs", "dev_server_status", "TEXT")
+        _add_column_if_missing(conn, "runs", "dev_server_url", "TEXT")
+        _add_column_if_missing(conn, "runs", "dev_server_error", "TEXT")
     _seed_default_agent_specs()
 
 
@@ -483,14 +487,16 @@ def list_all_team_members():
 # --- projects ---------------------------------------------------------
 
 
-def create_project(name: str, brief: str, team_id: int, schedule: dict = None) -> int:
+def create_project(name: str, brief: str, team_id: int, schedule: dict = None,
+                    local_folder: str = None) -> int:
     schedule = schedule or {}
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO projects (name, brief, team_id, cron_expression, interval_minutes, "
             "schedule_frequency, schedule_weekday, schedule_month_day, schedule_hour, "
-            "schedule_minute, schedule_second, schedule_summary, schedule_enabled, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "schedule_minute, schedule_second, schedule_summary, schedule_enabled, "
+            "local_folder, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 brief,
@@ -505,6 +511,7 @@ def create_project(name: str, brief: str, team_id: int, schedule: dict = None) -
                 schedule.get("second"),
                 schedule.get("summary"),
                 1 if schedule.get("frequency") else 0,
+                local_folder,
                 now_iso(),
             ),
         )
@@ -624,6 +631,34 @@ def stop_run(run_id: int, message: str = "Stopped by user."):
             "UPDATE runs SET status = 'failed', error = ?, finished_at = ? "
             "WHERE id = ? AND status = 'running'",
             (message, now_iso(), run_id),
+        )
+
+
+def set_dev_server_status(run_id: int, status: str, url: str = None, error: str = None):
+    """Tracks the local dev-server lifecycle for a run whose site.zip was
+    extracted and started locally (see local_runner.py) - status is one of
+    'starting' / 'ready' / 'failed'. Polled by the dashboard's existing
+    4s run-status fetch (dev_server_* are plain columns, so they ride
+    along with the rest of the row) rather than a separate endpoint."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE runs SET dev_server_status = ?, dev_server_url = ?, dev_server_error = ? WHERE id = ?",
+            (status, url, error, run_id),
+        )
+
+
+def stop_dev_server_status_for_project(project_id: int):
+    """Marks any run row for this project still showing a live local dev
+    server ('starting'/'ready') as 'stopped', so the dashboard drops the
+    now-dead link instead of showing a stale one. Only one dev server runs
+    per project at a time (local_runner.py is keyed by project_id), but
+    this touches every matching row defensively rather than assuming
+    exactly one."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE runs SET dev_server_status = 'stopped' "
+            "WHERE project_id = ? AND dev_server_status IN ('starting', 'ready')",
+            (project_id,),
         )
 
 

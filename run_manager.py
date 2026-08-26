@@ -8,9 +8,11 @@ poll them; the final outcome is persisted to SQLite via db.py.
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Callable
 
 import db
+import local_runner
 import pipeline
 
 # run_id -> list of event dicts, most recent last. Cleared lazily; fine for
@@ -43,6 +45,35 @@ def get_run_log(run_id: int) -> list:
 def _append_log(run_id: int, event: dict):
     with _LOCK:
         _RUN_LOGS.setdefault(run_id, []).append(event)
+
+
+def _start_local_site(run_id: int, project_id: int, site_zip_path: str):
+    """Extracts site.zip and boots its dev server in place (see
+    local_runner.py), right after a successful run whose team includes a
+    Developer. Runs inline in the same background thread as the pipeline
+    call - already off the Flask request thread, so the extra time this
+    takes (install + boot, up to a couple minutes) never blocks anything.
+
+    Deliberately swallows its own exceptions: the pipeline run already
+    succeeded and produced real deliverables by the time this is called,
+    so a bug in local-server startup must never flip the run's own status
+    to 'failed' - it's recorded as dev_server_status='failed' instead,
+    scoped to just the local-run feature.
+    """
+    db.set_dev_server_status(run_id, "starting")
+
+    def on_event(event):
+        _append_log(run_id, event)
+
+    try:
+        site_dir = local_runner.extract_site(Path(site_zip_path), Path(site_zip_path).parent)
+        outcome = local_runner.start_dev_server(project_id, site_dir, on_event=on_event)
+    except Exception as exc:  # noqa: BLE001 - never let this fail the run itself
+        db.set_dev_server_status(run_id, "failed", error=str(exc))
+        _append_log(run_id, {"kind": "dev_server_failed", "error": str(exc)})
+        return
+
+    db.set_dev_server_status(run_id, outcome["status"], url=outcome["url"], error=outcome["error"])
 
 
 def start_run(project_id: int, trigger_type: str) -> int:
@@ -87,6 +118,7 @@ def start_run(project_id: int, trigger_type: str) -> int:
         try:
             result = _PIPELINE_FN(
                 project["name"], project["brief"], team,
+                local_folder=project["local_folder"],
                 on_event=on_event, should_stop=cancel_event.is_set,
             )
             db.finish_run(
@@ -100,6 +132,8 @@ def start_run(project_id: int, trigger_type: str) -> int:
                 qa_artifacts_path=result.qa_artifacts_path,
                 cost_usd=result.cost_usd,
             )
+            if result.site_path:
+                _start_local_site(run_id, project_id, result.site_path)
         except pipeline.PipelineStopped as exc:
             _append_log(run_id, {"kind": "status", "message": str(exc)})
             db.stop_run(run_id, str(exc) or "Stopped by user.")

@@ -421,6 +421,13 @@ section { margin-bottom: var(--sp-12); }
 .run-cost { font-family: var(--font-mono); font-size: 0.85rem; }
 
 .brief-cell { max-width: 320px; }
+.local-folder-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
 .brief-preview {
   background: none;
   border: none;
@@ -664,6 +671,7 @@ details[open] > summary::before { content: "▾ "; }
 }
 .brief-field-preview.is-empty { color: var(--text-faint); font-style: italic; }
 .field-error { font-size: 0.8rem; color: var(--danger); font-weight: 600; }
+.field-hint { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
 
 .new-project-actions { display: flex; gap: var(--sp-3); margin-top: 2px; }
 input, textarea, select {

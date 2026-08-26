@@ -255,8 +255,50 @@ multi-file website. His system prompt instructs him to zip
 `pipeline.py`'s `wanted` dict (which filters which session files get
 downloaded) includes `"site.zip"` only when the team has a `developer`.
 The dashboard serves it as-is (`application/zip`, no server-side unzip -
-matches how `brd_path`/`tdd_path` are already just stored file paths, and
-a user running the site locally has to unzip it themselves regardless).
+matches how `brd_path`/`tdd_path` are already just stored file paths).
+
+### Auto-starting the site locally: `run.json` + `local_runner.py`
+
+Once `pipeline.py` finishes downloading `site.zip` to the project's
+`local_folder`, `run_manager.py`'s worker thread (still off the Flask
+request thread) hands off to `local_runner.py`: unzip `site.zip` in place
+(replacing any previously extracted `site/`, same overwrite-in-place
+behavior as the zip download itself), read `site/run.json`, run its
+`install_cmd`, launch its `start_cmd` as a long-lived background process,
+then poll `run.json`'s `url` over HTTP until something answers.
+
+`run.json` is a small contract Smith is required to write (see
+`DEVELOPER_SPECIALIST_SYSTEM` in `../labs/shared/prompts.py`):
+`{"install_cmd":, "start_cmd":, "url":}`. This is what keeps the app
+stack-agnostic - Smith can build in Node, Python, ASP.NET Core, or
+anything else in his skill list, and `local_runner.py` never has to guess
+per-stack install/run commands; it just runs whatever Smith wrote down.
+`site.zip` built before this requirement existed will fail cleanly
+("site/run.json is missing... run the project again to regenerate it")
+rather than silently doing nothing.
+
+Progress (`"Installing dependencies: ..."`, `"Starting dev server: ..."`)
+and the terminal outcome are recorded on the *run* row
+(`runs.dev_server_status` - `starting`/`ready`/`failed`/`stopped`,
+`dev_server_url`, `dev_server_error`), polled by the dashboard's existing
+4s run-status fetch and patched into a "Local site" cell live - this
+patch is separate from the reload-on-run-finish behavior in
+`pollRuns()`, since dev-server startup (install + boot) can still be
+"starting" for a minute or two after the run itself already shows
+`success`.
+
+The running process itself is tracked in `local_runner._RUNNING`, keyed
+by **project id**, not run id - only one dev server runs per project at a
+time. Starting a new one (a re-run, or a manual "Run now") stops
+whatever was previously running for that project first, mirroring the
+existing overwrite-in-place semantics for the downloaded files. Deleting
+a project also stops its dev server. There is no persistence for this
+registry across an `agent_console` restart (same in-memory tradeoff
+`run_manager.py` already makes for `_RUN_LOGS`/`_CANCEL_EVENTS`) - and
+because a child process isn't killed with its parent on Windows, a
+restarted `agent_console` loses track of (but does not kill) any dev
+server it had started; stop it from the dashboard, or manually, first if
+that matters.
 
 ### The "ralph loop" clarification
 

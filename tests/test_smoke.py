@@ -98,7 +98,7 @@ class FakeAnthropicClient:
         )
 
 
-def fake_pipeline(project_name, project_brief, team, *, max_iterations=None, on_event=None, should_stop=None):
+def fake_pipeline(project_name, project_brief, team, *, local_folder=None, max_iterations=None, on_event=None, should_stop=None):
     """Stands in for pipeline.run_delivery_pipeline - no network calls.
     Accepts (and ignores) the `team` bundle so it matches run_manager's
     real call signature."""
@@ -324,13 +324,29 @@ def main():
 
     db.delete_team(rename_team_id)
 
+    # 6b. Creating a project with a team but no local folder is rejected.
+    resp = client.post(
+        "/projects",
+        data={
+            "team_id": str(team1_id),
+            "name": "No Local Folder Project",
+            "brief": "Should not be created.",
+        },
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert len(db.list_projects()) == 0, "project must not be created without a local folder"
+    print("PASS: project creation without a local folder is rejected")
+
     # 8. Create a project against team1.
+    local_folder = str(TMP / "local-projects" / "coffee-roastery")
     resp = client.post(
         "/projects",
         data={
             "team_id": str(team1_id),
             "name": "Boutique Coffee Roastery Website",
             "brief": "Sell beans online, let people book roastery tours.",
+            "local_folder": local_folder,
         },
         follow_redirects=True,
     )
@@ -339,7 +355,8 @@ def main():
     assert len(projects) == 1, f"expected 1 project, got {len(projects)}"
     project_id = projects[0]["id"]
     assert projects[0]["team_id"] == team1_id
-    print(f"PASS: project created against team1 (id={project_id})")
+    assert projects[0]["local_folder"] == local_folder
+    print(f"PASS: project created against team1 with local_folder (id={project_id})")
 
     # 8b. Renaming via the real /teams/new route (not just db.create_team
     # directly): confirm the form's per-role name_for_<id> fields actually
@@ -546,7 +563,7 @@ def main():
     print("PASS: /api/runs and /api/runs/<id>/log respond correctly")
 
     # 14. A failing run stores its error, and the dashboard actually shows it.
-    def failing_pipeline(project_name, project_brief, team, *, max_iterations=None, on_event=None, should_stop=None):
+    def failing_pipeline(project_name, project_brief, team, *, local_folder=None, max_iterations=None, on_event=None, should_stop=None):
         raise pipeline.PipelineError("GOOGLE_DOCS_VAULT_ID should start with 'vlt_'. Got: 'sk-ant-fake123'")
 
     run_manager.set_pipeline_fn(failing_pipeline)
@@ -580,7 +597,7 @@ def main():
     # 16. A run that hangs (simulating a slow/stuck platform call) can be
     # stopped from the dashboard - and its session id shows up in the
     # database while it's still in progress, not just once it's done.
-    def stallable_pipeline(project_name, project_brief, team, *, max_iterations=None,
+    def stallable_pipeline(project_name, project_brief, team, *, local_folder=None, max_iterations=None,
                             on_event=None, should_stop=None):
         if on_event:
             on_event({"kind": "session_created", "session_id": "sesn_STALL123"})
