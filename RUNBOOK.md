@@ -131,19 +131,24 @@ asks you to paste into `.env`.
 
 ## Step 2 - Confirm the folder layout
 
-Agent Console expects to sit next to the `labs/` folder, because
-`pipeline.py` imports shared prompts from `../labs/shared/prompts.py`.
+`pipeline.py` and `agent_specs_seed.py` import prompts/cost_meter/
+cache_usage from `agent_console/agentprompts/` - an in-repo folder, not
+an external dependency, so there's normally nothing to confirm here.
 
 ```bash
-cd /path/to/aioffering
-ls labs/shared/prompts.py        # should exist
-ls agent_console/app.py          # should exist
+ls agent_console/agentprompts/prompts.py   # should exist
 ```
 
-**Outcome:** confirms `pipeline.py`'s `LABS_SHARED_DIR` default (`../labs/shared`,
-resolved relative to `agent_console/`) will actually resolve. If you move
-`agent_console/` somewhere else, set the `LABS_SHARED_DIR` environment
-variable to point at the real `labs/shared` path.
+**Outcome:** confirms `config.AGENT_PROMPTS_DIR`'s default
+(`agent_console/agentprompts`) will resolve. Only relevant if you've
+relocated that folder - set the `AGENT_PROMPTS_DIR` environment variable
+to point at wherever it actually lives.
+
+This folder started as a copy of `../labs/shared/` (a separate,
+un-versioned notebook project that used to be the only place these
+prompts lived - see `docs/multi-agent-teams.md`). The two are now
+independent: a prompt change meant for both has to be made in both
+places by hand.
 
 ---
 
@@ -421,7 +426,7 @@ source code.
 
 - **Change your organization's default tech stack or tone:** edit
   `ORG_STANDARDS_STYLE` / `ORG_STANDARDS_TECH_DEFAULTS` in
-  `../labs/shared/prompts.py`. This only affects *new* `org-standards`
+  `agent_console/agentprompts/prompts.py`. This only affects *new* `org-standards`
   memory stores - an already-created one (check
   `data/agent_cache.json`) needs its memory files updated directly, or
   delete `data/agent_cache.json` to force recreation on the next run
@@ -442,7 +447,7 @@ source code.
   `agent_cache.json` by hand for this specific case.
 - **Change what counts as "done":** the rubric is now assembled per-team
   from `RUBRIC_BRD_SECTION` / `RUBRIC_TDD_SECTION` / `RUBRIC_SITE_SECTION`
-  / `RUBRIC_QA_SECTION` in `../labs/shared/prompts.py`
+  / `RUBRIC_QA_SECTION` in `agent_console/agentprompts/prompts.py`
   (`pipeline._build_rubric`), included only for the roles actually on the
   team. Edit those constants for org-wide
   rubric changes.

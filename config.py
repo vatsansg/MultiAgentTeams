@@ -41,7 +41,13 @@ BETAS = ["managed-agents-2026-04-01"]
 OUTPUTS_DIR = Path(os.environ.get("AGENT_CONSOLE_OUTPUTS", str(BASE_DIR / "outputs")))
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
-# Path to the shared labs/ prompts module, reused rather than duplicated.
-LABS_SHARED_DIR = os.environ.get(
-    "LABS_SHARED_DIR", str((BASE_DIR / ".." / "labs" / "shared").resolve())
+# Path to the prompts/cost_meter/cache_usage modules pipeline.py and
+# agent_specs_seed.py import via sys.path insertion. Used to live outside
+# this repo at ../labs/shared (shared with a separate notebook project,
+# not versioned here) - now an in-repo copy under agentprompts/ so prompt
+# changes are tracked in this repo's own git history. The two projects'
+# copies are independent from this point on; a change meant for both now
+# has to be made in both places by hand.
+AGENT_PROMPTS_DIR = os.environ.get(
+    "AGENT_PROMPTS_DIR", str((BASE_DIR / "agentprompts").resolve())
 )

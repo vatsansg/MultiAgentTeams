@@ -4,7 +4,7 @@ role_key, so adding a new entry here also backfills it into an existing
 database (no DB wipe needed) the next time the app starts.
 
 Imported lazily (inside that function, not at db.py's module level) so
-db.py itself never needs the labs/shared sys.path trick pipeline.py
+db.py itself never needs the agentprompts sys.path trick pipeline.py
 already does.
 """
 import json
@@ -12,7 +12,7 @@ import sys
 
 import config
 
-sys.path.insert(0, config.LABS_SHARED_DIR)
+sys.path.insert(0, config.AGENT_PROMPTS_DIR)
 from prompts import (  # noqa: E402
     DELIVERY_COORDINATOR_BOILERPLATE,
     BA_SPECIALIST_SYSTEM, BA_HANDOFF_INSTRUCTIONS,

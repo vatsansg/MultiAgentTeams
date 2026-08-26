@@ -2,7 +2,7 @@
 
 Uses the machine-readable site/run.json manifest the Developer agent is
 now required to produce (see DEVELOPER_SPECIALIST_SYSTEM in
-../labs/shared/prompts.py: install_cmd, start_cmd, url) instead of
+agentprompts/prompts.py: install_cmd, start_cmd, url) instead of
 guessing install/start commands per tech stack - the Developer can build
 in Node, Python, .NET, or anything else in its skill list, and this stays
 generic by just running whatever commands it wrote down and polling the

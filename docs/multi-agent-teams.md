@@ -32,14 +32,17 @@ one entry to `DEFAULT_AGENT_SPECS`, and if it needs non-default tools, add
 a `_TOOLS_BY_ROLE["your_role_key"]` entry in `pipeline.py` (see "Tool
 configs" below) - then just restart the app.
 
-**`../labs/shared/prompts.py` is additive-only.** Its existing constants
-(`DELIVERY_COORDINATOR_SYSTEM`, `BA_SPECIALIST_SYSTEM`,
-`ARCHITECT_SPECIALIST_SYSTEM`, `DELIVERY_RUBRIC`, and others) are also
-imported verbatim by
+**`agent_console/agentprompts/prompts.py` is this repo's own copy**, added
+2026-08-27 (previously `../labs/shared/prompts.py`, external to this repo
+- see "Auto-starting the site locally" below for why it moved). Until
+then its existing constants (`DELIVERY_COORDINATOR_SYSTEM`,
+`BA_SPECIALIST_SYSTEM`, `ARCHITECT_SPECIALIST_SYSTEM`, `DELIVERY_RUBRIC`,
+and others) were kept strictly additive-only, because the same file was
+also imported verbatim by
 `../labs/ClaudeMultiAgent_ManagedAgent/ClaudeMultiAgent_ManagedAgent.ipynb`,
-a separate project not versioned together with this one. None of them may
-be renamed, removed, or edited in place. Every new prompt/handoff/rubric
-constant this feature needed was added alongside the existing ones instead:
+a separate, un-versioned notebook project - none of them were renamed,
+removed, or edited in place; every new prompt/handoff/rubric constant this
+feature needed was added alongside the existing ones instead:
 `DELIVERY_COORDINATOR_BOILERPLATE`, `BA_HANDOFF_INSTRUCTIONS`,
 `ARCHITECT_HANDOFF_INSTRUCTIONS`, `DEVELOPER_SPECIALIST_SYSTEM`,
 `DEVELOPER_HANDOFF_INSTRUCTIONS`, `RUBRIC_BRD_SECTION`,
@@ -49,6 +52,14 @@ constant this feature needed was added alongside the existing ones instead:
 and `ARCHITECT_SPECIALIST_SYSTEM` themselves are still reused unchanged -
 only the coordinator prompt and rubric needed to become composable, since
 both originals hardcode the old two-specialist shape.
+
+**Now that `agentprompts/` is this repo's own copy, that constraint no
+longer applies going forward** - it's a plain in-repo file like any
+other, free to edit directly. The notebook's `../labs/shared/prompts.py`
+still exists, untouched, with its own copy (which happens to already
+include the `run.json` addition below, since that was made before the
+copy was taken) - the two are independent from this point on, so a
+prompt change meant for both has to be made in both places by hand.
 
 Edit an existing role's text from the dashboard's **Agent Specs** page
 (`role_key` and `is_coordinator` are not exposed there, so "exactly one
@@ -268,7 +279,7 @@ behavior as the zip download itself), read `site/run.json`, run its
 then poll `run.json`'s `url` over HTTP until something answers.
 
 `run.json` is a small contract Smith is required to write (see
-`DEVELOPER_SPECIALIST_SYSTEM` in `../labs/shared/prompts.py`):
+`DEVELOPER_SPECIALIST_SYSTEM` in `agentprompts/prompts.py`):
 `{"install_cmd":, "start_cmd":, "url":}`. This is what keeps the app
 stack-agnostic - Smith can build in Node, Python, ASP.NET Core, or
 anything else in his skill list, and `local_runner.py` never has to guess

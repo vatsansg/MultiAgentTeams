@@ -35,7 +35,7 @@ from urllib.parse import urlparse
 
 import config
 
-sys.path.insert(0, config.LABS_SHARED_DIR)
+sys.path.insert(0, config.AGENT_PROMPTS_DIR)
 from prompts import (  # noqa: E402  (import after sys.path insert, matches notebook convention)
     ORG_STANDARDS_STYLE,
     ORG_STANDARDS_TECH_DEFAULTS,
