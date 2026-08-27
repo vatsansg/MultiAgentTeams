@@ -411,6 +411,29 @@ Common causes, and where to look:
 | Run reaches `not_satisfied` and never clears | The outcome rubric and your project brief may be pulling in different directions - see README.md / `../labs/ClaudeMultiAgent_ManagedAgent/README.md` for how the rubric works, and consider a more complete brief |
 | Run stays `running` forever | Likely a network stall inside the Anthropic SDK call - restart `python app.py` |
 
+**A failed *local site start* is a separate thing from a failed run** -
+see the "Local site" column, not "Error". The run itself can show
+`success` (the pipeline produced real deliverables) while the site still
+failed to boot locally, e.g. a missing build tool. That column shows a
+plain-language suggested fix plus a **Retry** button that re-extracts and
+restarts from the already-downloaded `site.zip` without spending API
+credits on a new run - see `docs/multi-agent-teams.md`'s "Diagnosing and
+retrying a failed local start" for how this works.
+
+**This machine's default Node was changed for this reason**: the
+system-wide Node install (v24, a very new "Current" release, not an LTS)
+had no prebuilt binary for `better-sqlite3` and failed to even compile it
+from source (a C++ standard mismatch between that Node version's headers
+and the package's build config - installing more build tools doesn't fix
+this). A portable Node 22 LTS was installed to `C:\vatsan\tools\node22`
+(no admin rights needed, self-contained, no system install) and
+prepended to this Windows user account's `PATH`, ahead of
+`C:\Program Files\nodejs\` - so any project's plain `npm install`/
+`npm run dev` now resolves to Node 22 automatically, which is much more
+likely to have prebuilt binaries for whatever native packages a
+Developer agent picks. This only affects `PATH` resolution order, not the
+system-wide Node install - nothing else changes.
+
 **How to actually see any of these:** a `failed` row's **Error** column in
 the Run history table shows the stored message directly - click it to
 expand the full text. You don't need to check the terminal unless the app

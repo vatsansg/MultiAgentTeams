@@ -410,6 +410,17 @@ SCOPE AND CONSTRAINTS
 - Seed any database with a small amount of realistic sample data so the
   site is immediately demonstrable after following the run instructions,
   not empty on first load.
+- If you build a Vite-based frontend that uses `socket.io-client` (or any
+  other package written for Node that leaks a bare `process` reference
+  into browser code), add a `define: { "process.env": {} }` entry to
+  `vite.config.ts`. Vite does not shim Node's `process` global for the
+  browser the way some other bundlers do, and without this the app
+  throws `ReferenceError: process is not defined` at load and renders a
+  completely blank page - it does not fail loudly in a way a quick visual
+  check would necessarily reveal without actually opening the browser
+  console, so verify the console is clean of this specific error as part
+  of your self-review below, not just that the page looks visually
+  correct.
 
 SELF-REVIEW LOOP (build, then critique, then revise)
 Before you finish, run this loop on your own output up to 4 times:
