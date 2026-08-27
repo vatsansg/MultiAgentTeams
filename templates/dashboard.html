@@ -326,10 +326,19 @@
           {% elif r['dev_server_status'] == 'starting' %}
             <span class="pill pill-pending">Starting&hellip;</span>
           {% elif r['dev_server_status'] == 'failed' %}
-            <details>
-              <summary class="error-summary pill pill-pending">Failed to start</summary>
-              <pre class="error-full">{{ r['dev_server_error'] }}</pre>
-            </details>
+            {% set _dev_err_parts = (r['dev_server_error'] or '').split('\n---\n', 1) %}
+            <div class="dev-server-fail">
+              <span class="pill pill-pending">Failed to start</span>
+              {% if _dev_err_parts|length > 1 %}
+                <p class="dev-server-suggestion">{{ _dev_err_parts[0] }}</p>
+                <details><summary class="error-summary">Full log</summary><pre class="error-full">{{ _dev_err_parts[1] }}</pre></details>
+              {% else %}
+                <details><summary class="error-summary">Details</summary><pre class="error-full">{{ _dev_err_parts[0] }}</pre></details>
+              {% endif %}
+              <form method="post" action="{{ url_for('dashboard.retry_local_site', run_id=r['id']) }}" style="display:inline;">
+                <button type="submit" class="btn" style="padding: 2px 8px; font-size: 0.78rem;">Retry</button>
+              </form>
+            </div>
           {% elif r['dev_server_status'] == 'stopped' %}
             <span class="pill pill-pending">Stopped</span>
           {% else %}—{% endif %}
@@ -680,9 +689,18 @@ async function pollRuns() {
         } else if (devStatus === 'starting') {
           devCell.innerHTML = '<span class="pill pill-pending">Starting&hellip;</span>';
         } else if (devStatus === 'failed') {
-          const err = (r.dev_server_error || '').replace(/</g, '&lt;');
+          const raw = r.dev_server_error || '';
+          const parts = raw.split('\n---\n');
+          const escape = (s) => s.replace(/</g, '&lt;');
+          const suggestion = parts.length > 1 ? `<p class="dev-server-suggestion">${escape(parts[0])}</p>` : '';
+          const detail = escape(parts.length > 1 ? parts[1] : parts[0]);
+          const detailLabel = parts.length > 1 ? 'Full log' : 'Details';
           devCell.innerHTML =
-            `<details><summary class="error-summary pill pill-pending">Failed to start</summary><pre class="error-full">${err}</pre></details>`;
+            `<div class="dev-server-fail"><span class="pill pill-pending">Failed to start</span>` +
+            suggestion +
+            `<details><summary class="error-summary">${detailLabel}</summary><pre class="error-full">${detail}</pre></details>` +
+            `<form method="post" action="/runs/${r.id}/retry-local-site" style="display:inline;">` +
+            `<button type="submit" class="btn" style="padding: 2px 8px; font-size: 0.78rem;">Retry</button></form></div>`;
         } else if (devStatus === 'stopped') {
           devCell.innerHTML = '<span class="pill pill-pending">Stopped</span>';
         } else {

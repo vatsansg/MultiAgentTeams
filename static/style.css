@@ -571,6 +571,15 @@ tr.empty-row td { border-bottom: none; padding: 0; }
   max-width: 480px;
 }
 
+.dev-server-cell { max-width: 260px; }
+.dev-server-fail { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.dev-server-suggestion {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  color: var(--text);
+  font-weight: 500;
+}
+
 /* ==========================================================================
    Buttons
    ========================================================================== */

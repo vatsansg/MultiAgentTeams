@@ -348,6 +348,9 @@ RUBRIC_SITE_SECTION = """\
   is what starts the site automatically, so drift between it and the
   README means the automated start will fail even though the README
   looks correct.
+- If start_cmd needs more than one process running at once, it uses
+  `concurrently`, not POSIX-only `&`/`wait` shell job control (which
+  does nothing useful on Windows, where these commands actually run).
 - Every page/feature called for in the Technical Design Document (or, if
   none exists, the brief) is present and functions, not just visually
   present in the file tree.
@@ -418,7 +421,10 @@ Before you finish, run this loop on your own output up to 4 times:
      - Does it run with the exact steps your own README documents, with
        no missing step (dependency install, env var, seed command)? Does
        run.json's install_cmd/start_cmd/url match those exact steps
-       word-for-word - no drift between the two?
+       word-for-word - no drift between the two? If start_cmd runs more
+       than one process, does it use `concurrently` rather than
+       POSIX-only `&`/`wait` shell job control (which silently does
+       nothing useful on Windows cmd.exe)?
      - Is the layout usable and uncluttered at both a 375px-wide and a
        1280px-wide viewport?
      - Is there any obviously broken state (console errors on load, a
@@ -470,6 +476,17 @@ DELIVERABLE
    /workspace/site/ on the machine running this pipeline (not inside
    this sandbox) - they must be exactly what a person would type from a
    clean checkout, nothing sandbox-specific.
+   CRITICAL: that machine may be Windows, where these commands run
+   through cmd.exe, not bash. Never rely on POSIX-only shell job control
+   to run multiple processes together - `cmd1 & cmd2 & wait` is a bash
+   idiom; in cmd.exe, `&` just means "run sequentially" and `wait` isn't
+   a recognized command at all, so a script written this way silently
+   never starts the second process. If the site needs more than one
+   process running at once (e.g. a separate frontend dev server and
+   backend API server), add `concurrently` as a devDependency and use it
+   instead (`concurrently "cmd1" "cmd2"`) - it runs identically on
+   Windows, macOS, and Linux. If only one process needs to run, start_cmd
+   needs no special handling at all.
 4. Once the build passes your own self-review: from /workspace/, zip the
    entire site/ directory into /workspace/site.zip (the zip's top level
    should be the site/ folder itself, so unzipping it reproduces

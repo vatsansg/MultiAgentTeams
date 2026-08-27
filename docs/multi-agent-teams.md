@@ -311,6 +311,38 @@ restarted `agent_console` loses track of (but does not kill) any dev
 server it had started; stop it from the dashboard, or manually, first if
 that matters.
 
+### Diagnosing and retrying a failed local start
+
+`local_runner._diagnose()` matches known local-machine-setup failure
+signatures (missing C++ build tools, npm/Python/.NET not on PATH, a port
+already in use, a permissions error) against the install/start log, and
+`_format_error()` prefixes a short, actionable suggestion ahead of the
+raw log - stored as one string in `runs.dev_server_error`, separated by
+a `\n---\n` marker the dashboard template and `pollRuns()` JS both split
+on to show the suggestion prominently with the raw log collapsed
+underneath. No match just means no suggestion, not that nothing's wrong.
+
+The dashboard's **Retry** button (`/runs/<id>/retry-local-site` ->
+`run_manager.retry_local_site()`) re-extracts and re-starts from the
+run's already-downloaded `site.zip` without touching the pipeline or
+`runs.status` at all - for the common case where the first attempt
+failed for a reason since fixed on this machine (a build tool installed,
+a port freed up), so fixing it locally and clicking Retry never needs to
+spend API credits on a new agent run.
+
+**Known real-world gap this surfaced**: a brand-new Node.js version can
+have no prebuilt binary for a native package like `better-sqlite3`, and
+compiling from source can itself fail if that Node version's headers
+require a newer C++ standard than the package's build config requests
+(observed: `v8config.h` requiring C++20 while the package's own
+`vcxproj` forces C++17) - installing more build tools does not fix this;
+it's a real incompatibility between that Node version and that package's
+current build config, not a missing-tool problem. There's no code fix
+for this in `agent_console` itself (it's an execution-environment fact,
+not something the pipeline controls) - the practical fix is an LTS Node
+version (20.x/22.x), which is what typically has both a prebuilt binary
+and a build config that actually works.
+
 ### The "ralph loop" clarification
 
 The original request asked for Smith to "use ralph loop plugins for

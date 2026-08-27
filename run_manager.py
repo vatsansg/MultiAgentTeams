@@ -76,6 +76,27 @@ def _start_local_site(run_id: int, project_id: int, site_zip_path: str):
     db.set_dev_server_status(run_id, outcome["status"], url=outcome["url"], error=outcome["error"])
 
 
+def retry_local_site(run_id: int) -> bool:
+    """Re-extracts and re-starts a run's already-downloaded site.zip
+    without re-running the pipeline - for the common case where the first
+    attempt failed for a local-machine reason (a missing build tool, a
+    port in use, npm not on PATH) that's since been fixed on this
+    machine. The site.zip itself doesn't need to change, so there's no
+    reason to spend API credits on a new agent run just to retry the
+    local-start step. Returns False (no-op) if this run never produced a
+    site to retry.
+    """
+    run = db.get_run(run_id)
+    if run is None or not run["site_path"]:
+        return False
+
+    def worker():
+        _start_local_site(run_id, run["project_id"], run["site_path"])
+
+    threading.Thread(target=worker, name=f"retry-local-{run_id}", daemon=True).start()
+    return True
+
+
 def start_run(project_id: int, trigger_type: str) -> int:
     """Create a run record and kick off the pipeline in a background thread.
 

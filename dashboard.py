@@ -132,6 +132,17 @@ def stop_dev_server(project_id):
     return redirect(url_for("dashboard.index"))
 
 
+@bp.route("/runs/<int:run_id>/retry-local-site", methods=["POST"])
+def retry_local_site(run_id):
+    """Retries just the extract-and-start step for a run whose site.zip
+    already downloaded successfully but whose local dev server failed to
+    start - e.g. a missing build tool that's since been installed. Doesn't
+    touch the pipeline/run status at all, so it never spends API credits."""
+    if not run_manager.retry_local_site(run_id):
+        flash("This run has no site to retry.", "error")
+    return redirect(url_for("dashboard.index"))
+
+
 @bp.route("/teardown", methods=["POST"])
 def teardown():
     """Deletes/archives every Managed Agents platform resource this app has

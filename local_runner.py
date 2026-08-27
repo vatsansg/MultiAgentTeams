@@ -16,6 +16,7 @@ existed will fail cleanly with a message saying to re-run the project.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import threading
@@ -29,6 +30,74 @@ from typing import Callable, Optional
 INSTALL_TIMEOUT = 300  # seconds allowed for the install command
 READY_TIMEOUT = 120    # seconds allowed for the dev server to start responding
 POLL_INTERVAL = 1.5
+
+# Known local-machine-setup failure signatures -> a short, actionable fix,
+# shown up front in the dashboard's "Local site" failure detail (see
+# _diagnose below) instead of leaving the user to read a raw npm/node-gyp
+# log to figure out what to do. Checked in order, first match wins - most
+# specific first. Purely heuristic: no match just means no suggestion is
+# shown, not that nothing is wrong.
+_KNOWN_FIXES = [
+    (re.compile(r"could not find any visual studio installation", re.I),
+     "A native npm package needs to compile, but no C++ build toolchain is "
+     "installed. Install the \"Desktop development with C++\" workload for "
+     "Visual Studio Build Tools (https://visualstudio.microsoft.com/downloads/, "
+     "under \"Tools for Visual Studio\"), then click Retry - no need to run "
+     "the project again."),
+    (re.compile(r"gyp err|node-gyp", re.I),
+     "A native npm package failed to compile (node-gyp). Usually a missing "
+     "C++ compiler toolchain (install Visual Studio Build Tools' \"Desktop "
+     "development with C++\" workload) or a Node version too new to have a "
+     "prebuilt binary yet (an LTS Node version - 20.x/22.x - is more likely "
+     "to just work). Fix locally, then Retry."),
+    (re.compile(r"'npm' is not recognized|npm: command not found|enoent.*npm", re.I),
+     "npm isn't installed or not on PATH. Install Node.js (it bundles npm) "
+     "and make sure it's on your system PATH, then Retry."),
+    (re.compile(r"could not find python|python.*not found|gyp.*python", re.I),
+     "node-gyp needs Python to build native modules. Install Python 3, "
+     "make sure it's on PATH, then Retry."),
+    (re.compile(r"eaddrinuse", re.I),
+     "Something else on this machine is already using that port. Stop "
+     "whatever's bound to it, then Retry."),
+    (re.compile(r"'dotnet' is not recognized|dotnet: command not found", re.I),
+     "This site needs the .NET SDK, which isn't installed or not on PATH. "
+     "Install it from https://dotnet.microsoft.com/download, then Retry."),
+    (re.compile(r"'python' is not recognized|python: command not found", re.I),
+     "This site needs Python, which isn't installed or not on PATH. Install "
+     "it, make sure it's on PATH, then Retry."),
+    (re.compile(r"eacces|permission denied", re.I),
+     "A permissions error while installing or starting. Check that nothing "
+     "else has files in this folder locked/open, then Retry."),
+]
+
+
+def _diagnose(text: str) -> Optional[str]:
+    """Matches recent log output against _KNOWN_FIXES. Returns the first
+    matching suggestion, or None if nothing recognizable was found."""
+    if not text:
+        return None
+    for pattern, suggestion in _KNOWN_FIXES:
+        if pattern.search(text):
+            return suggestion
+    return None
+
+
+def _format_error(detail: str, log_path: Path = None) -> str:
+    """Builds the string stored in runs.dev_server_error. When a log file
+    is given and something recognizable is in it, prefixes a plain-language
+    suggested fix (shown prominently in the dashboard) ahead of the raw
+    detail (shown collapsed) - separated by a marker line the dashboard
+    template/JS split on, never shown to the user directly."""
+    log_text = ""
+    if log_path is not None and log_path.exists():
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            log_text = ""
+    suggestion = _diagnose(log_text) or _diagnose(detail)
+    if suggestion:
+        return f"{suggestion}\n---\n{detail}"
+    return detail
 
 # project_id -> {"process": Popen, "url": str, "log_file": file handle}
 # In-memory only, same tradeoff run_manager.py already makes for
@@ -143,12 +212,18 @@ def start_dev_server(project_id: int, site_dir: Path,
             )
         except subprocess.TimeoutExpired:
             log_file.close()
-            error = f"Install command timed out after {INSTALL_TIMEOUT}s: {install_cmd}. See {log_path}"
+            error = _format_error(
+                f"Install command timed out after {INSTALL_TIMEOUT}s: {install_cmd}. See {log_path}",
+                log_path,
+            )
             emit("dev_server_failed", error=error)
             return {"status": "failed", "url": None, "error": error}
         if result.returncode != 0:
             log_file.close()
-            error = f"Install command failed (exit {result.returncode}): {install_cmd}. See {log_path}"
+            error = _format_error(
+                f"Install command failed (exit {result.returncode}): {install_cmd}. See {log_path}",
+                log_path,
+            )
             emit("dev_server_failed", error=error)
             return {"status": "failed", "url": None, "error": error}
 
@@ -165,7 +240,10 @@ def start_dev_server(project_id: int, site_dir: Path,
     if not ready:
         exited = process.poll()
         detail = f"process exited with code {exited}" if exited is not None else "process still running - check its log"
-        error = f"Dev server did not respond at {manifest['url']} within {READY_TIMEOUT}s ({detail}). See {log_path}"
+        error = _format_error(
+            f"Dev server did not respond at {manifest['url']} within {READY_TIMEOUT}s ({detail}). See {log_path}",
+            log_path,
+        )
         emit("dev_server_failed", error=error)
         return {"status": "failed", "url": manifest["url"], "error": error}
 
